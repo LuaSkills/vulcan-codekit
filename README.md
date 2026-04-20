@@ -78,7 +78,7 @@ If you do not pass `--base-url`, the generated `source.yaml` uses a placeholder 
 
 GitHub validation:
 
-- pushes to `main` only run structure validation
+- pushes to `main` do not trigger GitHub Actions automatically
 - pull requests only run structure validation
 - no release package is published from branch pushes
 
