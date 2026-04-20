@@ -1,15 +1,15 @@
 name: LuaSkills Demo Skill
-version: 0.1.0
+version: 0.1.1
 enable: true
 debug: false
 lancedb:
   enable: false
-  log_level: warn
+  log_level: warning
   slow_log_enabled: false
   slow_log_threshold_ms: 800
 sqlite:
   enable: false
-  log_level: warn
+  log_level: warning
   slow_log_enabled: false
   slow_log_threshold_ms: 800
 help:
