@@ -148,7 +148,7 @@ def validate_dependencies(root: Path) -> None:
     require(ast_grep_source.get("type") == "github_release", "ast-grep-ffi must install from GitHub Release")
     require(isinstance(ast_grep_github, dict), "ast-grep-ffi github_release source must declare github config")
     require(
-        ast_grep_github.get("repo") == "OpenVulcan/luaskills-vulcan-codekit",
+        ast_grep_github.get("repo") == "LuaSkills/vulcan-codekit",
         "ast-grep-ffi must point to the current GitHub release repository",
     )
     packages = ast_grep_ffi.get("packages", {})

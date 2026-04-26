@@ -56,14 +56,6 @@ def manifest_skill_id(manifest: dict) -> str:
 
 
 """
-Return the repository-based release asset stem.
-返回基于仓库名的发布资产名称前缀。
-"""
-def release_asset_stem(root: Path) -> str:
-    return root.name
-
-
-"""
 Resolve the effective package version and enforce it against CLI or GitHub tag inputs.
 解析最终打包版本，并强制要求其与命令行或 GitHub 标签输入保持一致。
 """
@@ -138,7 +130,7 @@ Build the release zip and checksum file under the selected output directory.
 def build_package(root: Path, out_dir: Path, version: str) -> tuple[Path, Path]:
     manifest = load_manifest(root)
     archive_root = manifest_skill_id(manifest)
-    package_stem = release_asset_stem(root)
+    package_stem = archive_root
 
     out_dir.mkdir(parents=True, exist_ok=True)
     package_name = f"{package_stem}-v{version}-skill.zip"
@@ -171,7 +163,7 @@ def build_source_metadata(
 ) -> Path:
     manifest = load_manifest(root)
     skill_name = manifest_skill_id(manifest)
-    package_stem = release_asset_stem(root)
+    package_stem = skill_name
 
     source_name = f"{package_stem}-v{version}-source.yaml"
     source_path = out_dir / source_name

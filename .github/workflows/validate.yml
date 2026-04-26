@@ -37,7 +37,7 @@ jobs:
           from pathlib import Path
           from zipfile import ZipFile
 
-          package_path = next(Path("dist-skill-smoke").glob("luaskills-vulcan-codekit-v*-skill.zip"))
+          package_path = next(Path("dist-skill-smoke").glob("vulcan-codekit-v*-skill.zip"))
           with ZipFile(package_path) as archive:
               names = archive.namelist()
 

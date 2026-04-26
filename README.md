@@ -366,8 +366,8 @@
 
 本仓库遵循 LuaSkills 的 GitHub Release 安装规则。技能包就是标准 LuaSkill 包，发布资产名称为：
 
-- `luaskills-vulcan-codekit-v{version}-skill.zip`
-- `luaskills-vulcan-codekit-v{version}-checksums.txt`
+- `vulcan-codekit-v{version}-skill.zip`
+- `vulcan-codekit-v{version}-checksums.txt`
 
 压缩包内部的顶层目录必须是运行时技能名：
 
@@ -376,7 +376,7 @@
 `ast-grep-ffi` 不打进技能包本体，而是由 `dependencies.yaml` 通过 GitHub Release 依赖安装。当前准确的 Release 仓库地址是：
 
 ```yaml
-repo: OpenVulcan/luaskills-vulcan-codekit
+repo: LuaSkills/vulcan-codekit
 ```
 
 GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持手动运行。运行时填写 `version`，例如 `v0.1.0`，然后按需选择：

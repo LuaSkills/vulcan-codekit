@@ -53,7 +53,7 @@ ffi_dependencies:
     source:
       type: github_release
       github:
-        repo: OpenVulcan/luaskills-vulcan-codekit
+        repo: LuaSkills/vulcan-codekit
     packages:
       windows-x64:
         archive_type: zip
