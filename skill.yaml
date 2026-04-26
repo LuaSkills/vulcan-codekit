@@ -1,63 +1,143 @@
-name: LuaSkills Demo Skill
-version: 0.1.2
-enable: true
-debug: false
-lancedb:
-  enable: false
-  log_level: warning
-  slow_log_enabled: false
-  slow_log_threshold_ms: 800
-sqlite:
-  enable: false
-  log_level: warning
-  slow_log_enabled: false
-  slow_log_threshold_ms: 800
+name: vulcan-codekit
+version: 0.1.0
+debug: true
 help:
   main:
-    description: Main help node for the LuaSkills demo repository used in update smoke tests.
-    file: help/help.md
+    description: Vulcan CodeKit 的主帮助与工作流导航。
+    file: help/vulcan_codekit_skill.lua
   topics:
-    - name: demo-status
-      description: Explain the runtime diagnostics tool.
-      file: help/demo-status.md
-    - name: rg-dependency
-      description: Explain the no-op rg dependency and how it is resolved.
-      file: help/rg-dependency.md
-    - name: overflow-demo
-      description: Explain the paged output demo and local overflow template.
-      file: help/overflow-demo.md
+    - name: ast-detail
+      description: 精确文件 AST 结构查看工作流。
+      file: help/ast-detail.md
+    - name: rg
+      description: 文本锚点反查 owner 上下文工作流。
+      file: help/rg.md
+    - name: markdown-menu
+      description: Markdown 标题导航工作流。
+      file: help/markdown-menu.md
+    - name: node-source
+      description: 按结构 selector 提取函数或方法源码工作流。
+      file: help/node-source.md
+    - name: tree
+      description: 项目结构建图与候选文件筛选工作流。
+      file: help/tree.md
+    - name: patch
+      description: 全函数安全替换工作流。
+      file: help/patch.md
 entries:
-  - name: demo-status
-    description: Return stable runtime diagnostics for install and lifecycle testing.
-    lua_entry: runtime/demo_status.lua
-    lua_module: demo_status
-    help: demo-status
+  - name: ast-detail
+    description: "[FILE AST DETAIL] Inspect one or more exact source files and return plain Markdown AST details. Use this only after you already know the exact files, typically from codekit-ast-tree or codekit-rg."
+    lua_entry: runtime/codekit-ast-detail.lua
+    lua_module: codekit_ast_detail
+    help: ast-detail
     parameters:
-      - name: name
+      - name: paths
         type: string
-        description: Optional caller label included in the response.
-        required: false
-      - name: include_context
+        description: "One or more explicit source-file paths separated by newlines (\\n). This tool does not accept directories or mixed path sets, and it supports at most 20 files per request."
+        required: true
+      - name: comment
         type: boolean
-        description: Include vulcan.context.request when true.
+        description: "Include condensed comment summaries for functions in the structural output (default: false). Separator-style comment banners and metadata-only lines such as params/returns are filtered out, and each summary is compressed to a short single-line note."
         required: false
-  - name: rg-check
-    description: Report the expected local rg dependency path and run rg --version when it exists.
-    lua_entry: runtime/rg_check.lua
-    lua_module: rg_check
-    help: rg-dependency
+  - name: rg
+    description: "[TEXT-TO-STRUCTURE BRIDGE] Use this after you have a text signal or regex target. Search a directory with ripgrep, then return only the directly relevant function/class AST context as plain Markdown."
+    lua_entry: runtime/codekit-rg.lua
+    lua_module: codekit_rg
+    help: rg
     parameters:
-      - name: run_version
+      - name: dir
+        type: string
+        description: "Target directory to search recursively. This parameter is required for a fresh search and must point to an existing directory."
+        required: false
+      - name: ext
+        type: string
+        description: "Optional file-extension filter, comma-separated (for example lua,rs,ts). You may also pass common language names such as rust or typescript, which are normalized to their corresponding file extensions. When omitted, codekit-rg uses the same built-in source-code default set as codekit-ast-detail and excludes non-core formats such as css/html/json/yaml."
+        required: false
+      - name: noignore
         type: boolean
-        description: Run rg --version when the local binary exists.
+        description: "Disable ignore rules only when set to true. Leave it unset for the normal ignored-by-default search behavior."
         required: false
-  - name: overflow-demo
-    description: Emit paged markdown output and one skill-local overflow template hint.
-    lua_entry: runtime/overflow_demo.lua
-    lua_module: overflow_demo
-    help: overflow-demo
+      - name: rg_pattern
+        type: string
+        description: "Ripgrep regex used for the first-pass text search. This parameter is required for a fresh search."
+        required: false
+  - name: markdown-menu
+    description: "[MARKDOWN MENU] Triage Markdown files by headings only. Use this to locate the right docs file or section before reading body text elsewhere."
+    lua_entry: runtime/codekit-markdown-menu.lua
+    lua_module: codekit_markdown_menu
+    help: markdown-menu
     parameters:
-      - name: sections
-        type: integer
-        description: Number of repeated sections in the generated markdown.
+      - name: path
+        type: string
+        description: "Target path. Supports a single file/directory, or multiple paths separated by newlines (\\n). Directory and file paths may be mixed in one request and duplicate Markdown files are automatically removed."
+        required: false
+      - name: recursive
+        type: boolean
+        description: "Whether to recurse into subdirectories when a directory is encountered (default: false). Keep this false for top-level doc triage and enable it only when you need nested Markdown files."
+        required: false
+      - name: noignore
+        type: boolean
+        description: "Disable ignore rules only when set to true. Leave it unset for the normal ignored-by-default documentation scan behavior."
+        required: false
+  - name: node-source
+    description: "[NODE SOURCE] Extract the full source text for one or more function or method nodes selected by structural selectors. Uses a required nodes[] payload where each node item carries its own file and selector, including same-file and cross-file batches."
+    lua_entry: runtime/codekit-node-source.lua
+    lua_module: codekit_node_source
+    help: node-source
+    parameters:
+      - name: nodes
+        type: array
+        description: "Required node input. Each item must be an object with file and selector fields, for example [{\"file\":\"src/main.rs\",\"selector\":\"main\"}]. Put the file path inside every node item; for same-file batches repeat the same file or place newline-separated selectors in that item's selector field."
+        required: true
+      - name: max_nodes
+        type: number
+        description: "Maximum node requests to process before marking the rest as skipped. Defaults to 20."
+        required: false
+  - name: ast-tree
+    description: "[DIRECTORY AST TREE] Pick candidate source files from exactly one directory before deep inspection. Returns a compact recursive Markdown tree grouped by subdirectory."
+    lua_entry: runtime/codekit-ast-tree.lua
+    lua_module: codekit_ast_tree
+    help: tree
+    parameters:
+      - name: paths
+        type: string
+        description: "Exactly one directory path. The parameter name remains `paths`, but the value must contain a single non-empty directory path only; multiple directories and file paths are rejected."
+        required: true
+      - name: ext
+        type: string
+        description: "Optional file-extension filter, comma-separated (for example rs,ts,tsx). You may also pass common language names such as rust or typescript, which are normalized to their corresponding file extensions. When omitted, codekit-ast-tree uses the built-in source-code default set."
+        required: false
+      - name: noignore
+        type: boolean
+        description: "Disable ignore rules only when set to true. Leave it unset for the normal ignored-by-default tree scan behavior."
+        required: false
+  - name: patch
+    description: "[FUNCTION AST PATCH] Replace one or more functions or methods by structural selector. Supports legacy file+selector+replacement and batch patches[] payloads. Batch mode defaults to atomic=true, so any validation failure rejects the whole batch before writing."
+    lua_entry: runtime/codekit-patch.lua
+    lua_module: codekit_patch
+    help: patch
+    parameters:
+      - name: file
+        type: string
+        description: "Legacy target file that contains the function to patch. Required only when patches[] is not provided."
+        required: false
+      - name: selector
+        type: string
+        description: "Legacy flexible structural selector for a function or method. Required only when patches[] is not provided."
+        required: false
+      - name: replacement
+        type: string
+        description: "Legacy replacement source text. It must be the complete function source, starting from the declaration line. Required only when patches[] is not provided."
+        required: false
+      - name: patches
+        type: array
+        description: "Optional batch input. Each item must include file, selector, and replacement. Optional item fields include expected_node_hash, expected_source_hash, expected_file_hash, and expected_range."
+        required: false
+      - name: atomic
+        type: boolean
+        description: "Whether the batch should be all-or-nothing. Defaults to true. Set false only when partial application is explicitly desired."
+        required: false
+      - name: max_patches
+        type: number
+        description: "Maximum patch requests to process in one call. Defaults to 20."
         required: false

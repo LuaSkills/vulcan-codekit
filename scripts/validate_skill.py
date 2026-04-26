@@ -1,6 +1,6 @@
 """
-Validate the demo LuaSkill repository against the strict package rules.
-校验演示 LuaSkill 仓库是否满足严格包结构规则。
+Validate the Vulcan CodeKit LuaSkill repository against the strict package rules.
+校验 Vulcan CodeKit LuaSkill 仓库是否满足严格包结构规则。
 """
 
 from __future__ import annotations
@@ -62,13 +62,14 @@ def validate_layout(root: Path) -> None:
         root / "skill.yaml",
         root / "dependencies.yaml",
         root / "README.md",
+        root / "THIRD_PARTY_NOTICES.md",
     ]
     required_dirs = [
         root / "runtime",
         root / "help",
         root / "overflow_templates",
-        root / "resources",
-        root / "licenses",
+        root / "rules",
+        root / "skills",
     ]
 
     for file_path in required_files:
@@ -115,14 +116,36 @@ def validate_manifest(root: Path) -> None:
 
 
 """
-Validate the dependency manifest used by the demo package.
-校验演示包使用的依赖清单。
+Validate the dependency manifest used by the CodeKit package.
+校验 CodeKit 包使用的依赖清单。
 """
 def validate_dependencies(root: Path) -> None:
     dependency_manifest = load_yaml(root / "dependencies.yaml")
     tools = dependency_manifest.get("tool_dependencies", [])
     require(isinstance(tools, list), "tool_dependencies must be a YAML list")
-    require(any(item.get("name") == "rg" for item in tools if isinstance(item, dict)), "The demo must declare one rg dependency")
+    require(any(item.get("name") == "rg" for item in tools if isinstance(item, dict)), "CodeKit must declare one rg dependency")
+    rg_dependency = next(item for item in tools if isinstance(item, dict) and item.get("name") == "rg")
+    rg_packages = rg_dependency.get("packages", {})
+    require(isinstance(rg_packages, dict) and rg_packages, "rg must declare platform packages")
+    for platform_name in ("windows-x64", "linux-x64", "linux-arm64", "macos-arm64", "macos-x64"):
+        require(platform_name in rg_packages, f"rg missing package for {platform_name}")
+    require(not any(item.get("name") == "ast-grep" for item in tools if isinstance(item, dict)), "ast-grep must be provided as an FFI dependency, not as a CLI tool dependency")
+
+    lua_dependencies = dependency_manifest.get("lua_dependencies", [])
+    ffi_dependencies = dependency_manifest.get("ffi_dependencies", [])
+    require(isinstance(lua_dependencies, list), "lua_dependencies must be a YAML list")
+    require(isinstance(ffi_dependencies, list), "ffi_dependencies must be a YAML list")
+    require(
+        any(item.get("name") == "ast-grep-ffi" for item in ffi_dependencies if isinstance(item, dict)),
+        "CodeKit must declare one ast-grep-ffi dependency",
+    )
+    ast_grep_ffi = next(
+        item for item in ffi_dependencies if isinstance(item, dict) and item.get("name") == "ast-grep-ffi"
+    )
+    packages = ast_grep_ffi.get("packages", {})
+    require(isinstance(packages, dict) and packages, "ast-grep-ffi must declare platform packages")
+    for platform_name in ("windows-x64", "linux-x64", "linux-arm64", "macos-arm64", "macos-x64"):
+        require(platform_name in packages, f"ast-grep-ffi missing package for {platform_name}")
 
     for group_name in ("lua_dependencies", "ffi_dependencies"):
         group = dependency_manifest.get(group_name, [])

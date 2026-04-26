@@ -3,13 +3,14 @@ luac.out
 
 # Build artifacts
 dist/
+target/
+ast-grep-ffi/target/
 
 # Runtime-generated environment artifacts
 dependencies/
 state/
 databases/
 temp/
-skills/
 bin/tools/*
 !bin/tools/.gitkeep
 lua_packages/*

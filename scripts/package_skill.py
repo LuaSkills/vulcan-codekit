@@ -89,11 +89,13 @@ def collect_package_paths(root: Path) -> list[Path]:
         "dependencies.yaml",
         "README.md",
         "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "sgconfig.yml",
         "runtime",
         "help",
         "overflow_templates",
-        "resources",
-        "licenses",
+        "rules",
+        "skills",
     }
 
     collected: list[Path] = []

@@ -1,4 +1,4 @@
-name: Validate LuaSkill
+name: Validate Vulcan CodeKit LuaSkill
 
 on:
   pull_request:
@@ -16,8 +16,20 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install validation dependencies
         run: python -m pip install --upgrade pip pyyaml
 
       - name: Validate strict skill layout
         run: python ./scripts/validate_skill.py
+
+      - name: Test ast-grep FFI crate
+        run: cargo test --manifest-path ast-grep-ffi/Cargo.toml
+
+      - name: Build ast-grep FFI release path smoke
+        run: cargo build --manifest-path ast-grep-ffi/Cargo.toml --release --target x86_64-unknown-linux-gnu --target-dir target
+
+      - name: Package ast-grep FFI release path smoke
+        run: python ./scripts/package_ffi.py --platform linux-x64 --library-path target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so --out-dir dist-ffi-smoke
