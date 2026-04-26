@@ -6,6 +6,11 @@ dist/
 target/
 ast-grep-ffi/target/
 
+# Local planning records should stay out of released repository history.
+# 本地计划记录不应进入发布仓库历史。
+docs/plan/
+docs/completed/
+
 # Runtime-generated environment artifacts
 dependencies/
 state/
