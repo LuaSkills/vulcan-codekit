@@ -369,6 +369,10 @@
 - `luaskills-vulcan-codekit-v{version}-skill.zip`
 - `luaskills-vulcan-codekit-v{version}-checksums.txt`
 
+压缩包内部的顶层目录必须是运行时技能名：
+
+- `vulcan-codekit/`
+
 `ast-grep-ffi` 不打进技能包本体，而是由 `dependencies.yaml` 通过 GitHub Release 依赖安装。当前准确的 Release 仓库地址是：
 
 ```yaml

@@ -28,6 +28,24 @@ jobs:
       - name: Validate strict skill layout
         run: python ./scripts/validate_skill.py
 
+      - name: Package LuaSkill release path smoke
+        run: python ./scripts/package_skill.py --out-dir dist-skill-smoke
+
+      - name: Check LuaSkill archive root
+        shell: python
+        run: |
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          package_path = next(Path("dist-skill-smoke").glob("luaskills-vulcan-codekit-v*-skill.zip"))
+          with ZipFile(package_path) as archive:
+              names = archive.namelist()
+
+          if not any(name.startswith("vulcan-codekit/") for name in names):
+              raise SystemExit("LuaSkill package must contain a vulcan-codekit/ root directory")
+          if any(name.startswith("luaskills-vulcan-codekit/") for name in names):
+              raise SystemExit("LuaSkill package must not contain a luaskills-vulcan-codekit/ root directory")
+
       - name: Check ast-grep FFI dependency licenses
         run: cargo deny check -c deny.toml --exclude-dev licenses
         working-directory: ast-grep-ffi

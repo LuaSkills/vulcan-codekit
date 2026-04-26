@@ -45,6 +45,25 @@ def manifest_version(manifest: dict) -> str:
 
 
 """
+Return the runtime skill id declared by the manifest.
+返回清单中声明的运行时技能标识符。
+"""
+def manifest_skill_id(manifest: dict) -> str:
+    skill_id = manifest.get("name")
+    if not isinstance(skill_id, str) or not skill_id.strip():
+        raise RuntimeError("skill.yaml must contain a non-empty name")
+    return skill_id.strip()
+
+
+"""
+Return the repository-based release asset stem.
+返回基于仓库名的发布资产名称前缀。
+"""
+def release_asset_stem(root: Path) -> str:
+    return root.name
+
+
+"""
 Resolve the effective package version and enforce it against CLI or GitHub tag inputs.
 解析最终打包版本，并强制要求其与命令行或 GitHub 标签输入保持一致。
 """
@@ -118,21 +137,19 @@ Build the release zip and checksum file under the selected output directory.
 """
 def build_package(root: Path, out_dir: Path, version: str) -> tuple[Path, Path]:
     manifest = load_manifest(root)
-    skill_name = root.name
-    display_name = manifest.get("name", skill_name)
-    if not isinstance(display_name, str) or not display_name:
-        raise RuntimeError("skill.yaml must contain a non-empty name")
+    archive_root = manifest_skill_id(manifest)
+    package_stem = release_asset_stem(root)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    package_name = f"{skill_name}-v{version}-skill.zip"
-    checksum_name = f"{skill_name}-v{version}-checksums.txt"
+    package_name = f"{package_stem}-v{version}-skill.zip"
+    checksum_name = f"{package_stem}-v{version}-checksums.txt"
     package_path = out_dir / package_name
     checksum_path = out_dir / checksum_name
 
     with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
         for file_path in collect_package_paths(root):
             relative_path = file_path.relative_to(root)
-            archive_path = Path(skill_name) / relative_path
+            archive_path = Path(archive_root) / relative_path
             archive.write(file_path, archive_path.as_posix())
 
     digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
@@ -153,12 +170,10 @@ def build_source_metadata(
     checksum_path: Path,
 ) -> Path:
     manifest = load_manifest(root)
-    skill_name = root.name
-    display_name = manifest.get("name", skill_name)
-    if not isinstance(display_name, str) or not display_name:
-        raise RuntimeError("skill.yaml must contain a non-empty name")
+    skill_name = manifest_skill_id(manifest)
+    package_stem = release_asset_stem(root)
 
-    source_name = f"{skill_name}-v{version}-source.yaml"
+    source_name = f"{package_stem}-v{version}-source.yaml"
     source_path = out_dir / source_name
     normalized_base_url = normalize_base_url(base_url)
     package_name = package_path.name
@@ -167,7 +182,7 @@ def build_source_metadata(
 
     payload = {
         "skill_id": skill_name,
-        "name": display_name,
+        "name": skill_name,
         "version": version,
         "source": {
             "kind": "url",
