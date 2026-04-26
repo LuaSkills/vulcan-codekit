@@ -39,9 +39,9 @@ on:
       macos_arm64_runner:
         description: "macOS ARM64 FFI runner (off to disable)"
         required: true
-        default: "macos-14"
+        default: "macos-15"
         type: choice
-        options: ["off", "macos-14", "macos-15", "9950x", "proart"]
+        options: ["off", "macos-15", "macos-26", "9950x", "proart"]
       macos_x64_runner:
         description: "macOS x64 FFI runner (off to disable)"
         required: true
@@ -84,7 +84,7 @@ jobs:
           INPUT_LUASKILL_RUNNER: ${{ github.event.inputs.luaskill_runner || 'ubuntu-latest' }}
           INPUT_LINUX_X64_RUNNER: ${{ github.event.inputs.linux_x64_runner || 'ubuntu-latest' }}
           INPUT_LINUX_ARM64_RUNNER: ${{ github.event.inputs.linux_arm64_runner || 'ubuntu-24.04-arm' }}
-          INPUT_MACOS_ARM64_RUNNER: ${{ github.event.inputs.macos_arm64_runner || 'macos-14' }}
+          INPUT_MACOS_ARM64_RUNNER: ${{ github.event.inputs.macos_arm64_runner || 'macos-15' }}
           INPUT_MACOS_X64_RUNNER: ${{ github.event.inputs.macos_x64_runner || 'macos-15-intel' }}
           INPUT_WINDOWS_X64_RUNNER: ${{ github.event.inputs.windows_x64_runner || 'windows-latest' }}
         run: |
@@ -140,7 +140,7 @@ jobs:
           $targets = [System.Collections.Generic.List[object]]::new()
           Add-FfiTarget -Targets $targets -Platform "linux-x64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_X64_RUNNER -Default "ubuntu-latest") -RustTarget "x86_64-unknown-linux-gnu" -LibraryPath "target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so"
           Add-FfiTarget -Targets $targets -Platform "linux-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_ARM64_RUNNER -Default "ubuntu-24.04-arm") -RustTarget "aarch64-unknown-linux-gnu" -LibraryPath "target/aarch64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so"
-          Add-FfiTarget -Targets $targets -Platform "macos-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_ARM64_RUNNER -Default "macos-14") -RustTarget "aarch64-apple-darwin" -LibraryPath "target/aarch64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib"
+          Add-FfiTarget -Targets $targets -Platform "macos-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_ARM64_RUNNER -Default "macos-15") -RustTarget "aarch64-apple-darwin" -LibraryPath "target/aarch64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib"
           Add-FfiTarget -Targets $targets -Platform "macos-x64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_X64_RUNNER -Default "macos-15-intel") -RustTarget "x86_64-apple-darwin" -LibraryPath "target/x86_64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib"
           Add-FfiTarget -Targets $targets -Platform "windows-x64" -Runner (Normalize-Runner -Runner $env:INPUT_WINDOWS_X64_RUNNER -Default "windows-latest") -RustTarget "x86_64-pc-windows-msvc" -LibraryPath "target/x86_64-pc-windows-msvc/release/vulcan_codekit_ast_grep_ffi.dll"
 
