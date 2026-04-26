@@ -15,6 +15,7 @@
 - 本文件用于包内合规归档与分发说明，不替代上游项目的原始许可证文本。
 - 实际分发、复制或随包提供二进制文件时，仍应同时保留上游项目要求附带的版权声明与许可证说明。
 - 以下信息以对应上游仓库的官方许可证文件为准。
+- Rust FFI 组件的传递依赖许可证清单由 `cargo-deny` 自动生成，并记录在 `THIRD_PARTY_LICENSES.md`。
 
 ## 1. ast-grep
 
@@ -60,3 +61,13 @@
 - 随包分发时需要保留的许可证要求
 
 若后续新增新的外部二进制工具、FFI 动态库或第三方运行时依赖，应继续在本文件中追加对应条目。
+
+## 4. 自动生成的 Rust 依赖许可证报告
+
+`ast-grep-ffi` 的 Rust 依赖图通过以下命令生成许可证报告：
+
+```powershell
+python .\scripts\generate_cargo_deny_notices.py
+```
+
+生成结果写入 `THIRD_PARTY_LICENSES.md`，该文件应与 skill 包、FFI release 包一起分发。CI 使用 `cargo-deny` 检查许可证策略，并校验生成报告是否与当前依赖图一致。

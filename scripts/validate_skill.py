@@ -142,6 +142,15 @@ def validate_dependencies(root: Path) -> None:
     ast_grep_ffi = next(
         item for item in ffi_dependencies if isinstance(item, dict) and item.get("name") == "ast-grep-ffi"
     )
+    ast_grep_source = ast_grep_ffi.get("source", {})
+    require(isinstance(ast_grep_source, dict), "ast-grep-ffi must declare one source object")
+    ast_grep_github = ast_grep_source.get("github", {})
+    require(ast_grep_source.get("type") == "github_release", "ast-grep-ffi must install from GitHub Release")
+    require(isinstance(ast_grep_github, dict), "ast-grep-ffi github_release source must declare github config")
+    require(
+        ast_grep_github.get("repo") == "OpenVulcan/luaskills-vulcan-codekit",
+        "ast-grep-ffi must point to the current GitHub release repository",
+    )
     packages = ast_grep_ffi.get("packages", {})
     require(isinstance(packages, dict) and packages, "ast-grep-ffi must declare platform packages")
     for platform_name in ("windows-x64", "linux-x64", "linux-arm64", "macos-arm64", "macos-x64"):

@@ -59,7 +59,9 @@ def resolve_version(manifest: dict, cli_version: str | None) -> str:
     import os
 
     ref_name = os.environ.get("GITHUB_REF_NAME", "").strip()
-    if ref_name:
+    ref_type = os.environ.get("GITHUB_REF_TYPE", "").strip()
+    ref_path = os.environ.get("GITHUB_REF", "").strip()
+    if ref_name and (ref_type == "tag" or ref_path.startswith("refs/tags/")):
         expected_tag = f"v{declared_version}"
         if ref_name != expected_tag:
             raise RuntimeError(
@@ -90,6 +92,7 @@ def collect_package_paths(root: Path) -> list[Path]:
         "README.md",
         "LICENSE",
         "THIRD_PARTY_NOTICES.md",
+        "THIRD_PARTY_LICENSES.md",
         "sgconfig.yml",
         "runtime",
         "help",

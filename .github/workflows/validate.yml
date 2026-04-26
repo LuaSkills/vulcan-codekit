@@ -19,11 +19,21 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked --version 0.19.4
+
       - name: Install validation dependencies
         run: python -m pip install --upgrade pip pyyaml
 
       - name: Validate strict skill layout
         run: python ./scripts/validate_skill.py
+
+      - name: Check ast-grep FFI dependency licenses
+        run: cargo deny check -c deny.toml --exclude-dev licenses
+        working-directory: ast-grep-ffi
+
+      - name: Check generated dependency license report
+        run: python ./scripts/generate_cargo_deny_notices.py --check
 
       - name: Test ast-grep FFI crate
         run: cargo test --manifest-path ast-grep-ffi/Cargo.toml

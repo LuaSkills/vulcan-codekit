@@ -1,17 +1,203 @@
 name: Release Vulcan CodeKit LuaSkill
 
+# This workflow can be triggered manually so skill and FFI assets can be rebuilt independently.
+# 该工作流支持手动触发，便于独立重建技能包与 FFI 产物。
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+      build_luaskill:
+        description: "Build LuaSkill package"
+        required: true
+        default: "on"
+        type: choice
+        options: ["on", "off"]
+      luaskill_runner:
+        description: "LuaSkill package runner (off to disable)"
+        required: true
+        default: "ubuntu-latest"
+        type: choice
+        options: ["off", "ubuntu-latest", "9950x", "proart"]
+      linux_x64_runner:
+        description: "Linux x64 FFI runner (off to disable)"
+        required: true
+        default: "ubuntu-latest"
+        type: choice
+        options: ["off", "ubuntu-latest", "ubuntu-24.04", "9950x", "proart"]
+      linux_arm64_runner:
+        description: "Linux ARM64 FFI runner (off to disable)"
+        required: true
+        default: "ubuntu-24.04-arm"
+        type: choice
+        options: ["off", "ubuntu-24.04-arm", "ubuntu-22.04-arm", "9950x", "proart"]
+      macos_arm64_runner:
+        description: "macOS ARM64 FFI runner (off to disable)"
+        required: true
+        default: "macos-14"
+        type: choice
+        options: ["off", "macos-14", "macos-15", "9950x", "proart"]
+      macos_x64_runner:
+        description: "macOS x64 FFI runner (off to disable)"
+        required: true
+        default: "macos-15-intel"
+        type: choice
+        options: ["off", "macos-15-intel", "macos-26-intel", "9950x", "proart"]
+      windows_x64_runner:
+        description: "Windows x64 FFI runner (off to disable)"
+        required: true
+        default: "windows-latest"
+        type: choice
+        options: ["off", "windows-latest", "9950x-win", "proart-win"]
 
 permissions:
   contents: write
 
+concurrency:
+  group: codekit-release-${{ github.workflow }}-${{ github.event.inputs.version || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
-  build-skill:
-    name: Build skill package
+  prepare-release:
+    name: Prepare Release Plan
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      version_no_v: ${{ steps.prepare.outputs.version_no_v }}
+      luaskill_runner: ${{ steps.prepare.outputs.luaskill_runner }}
+      build_luaskill: ${{ steps.prepare.outputs.build_luaskill }}
+      ffi_matrix: ${{ steps.prepare.outputs.ffi_matrix }}
+      has_ffi_targets: ${{ steps.prepare.outputs.has_ffi_targets }}
+      has_work: ${{ steps.prepare.outputs.has_work }}
+    steps:
+      - name: Build release plan from inputs
+        id: prepare
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          INPUT_BUILD_LUASKILL: ${{ github.event.inputs.build_luaskill || 'on' }}
+          INPUT_LUASKILL_RUNNER: ${{ github.event.inputs.luaskill_runner || 'ubuntu-latest' }}
+          INPUT_LINUX_X64_RUNNER: ${{ github.event.inputs.linux_x64_runner || 'ubuntu-latest' }}
+          INPUT_LINUX_ARM64_RUNNER: ${{ github.event.inputs.linux_arm64_runner || 'ubuntu-24.04-arm' }}
+          INPUT_MACOS_ARM64_RUNNER: ${{ github.event.inputs.macos_arm64_runner || 'macos-14' }}
+          INPUT_MACOS_X64_RUNNER: ${{ github.event.inputs.macos_x64_runner || 'macos-15-intel' }}
+          INPUT_WINDOWS_X64_RUNNER: ${{ github.event.inputs.windows_x64_runner || 'windows-latest' }}
+        run: |
+          # Normalize-Runner keeps tag-push defaults and manual input values on the same path.
+          # Normalize-Runner 将 tag push 默认值与手动输入值收敛到同一处理路径。
+          function Normalize-Runner {
+            param(
+              [string]$Runner,
+              [string]$Default
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Runner)) {
+              return $Default
+            }
+
+            return $Runner.Trim()
+          }
+
+          # Add-FfiTarget appends one enabled platform entry and keeps disabled platforms out of the matrix.
+          # Add-FfiTarget 只追加已启用的平台条目，避免关闭的平台进入矩阵。
+          function Add-FfiTarget {
+            param(
+              [System.Collections.Generic.List[object]]$Targets,
+              [string]$Platform,
+              [string]$Runner,
+              [string]$RustTarget,
+              [string]$LibraryPath
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Runner) -or $Runner -eq "off") {
+              return
+            }
+
+            $Targets.Add([ordered]@{
+              platform = $Platform
+              runner = $Runner
+              rust_target = $RustTarget
+              library_path = $LibraryPath
+            })
+          }
+
+          $version = Normalize-Runner -Runner $env:INPUT_VERSION -Default "v0.1.0"
+          if (-not $version.StartsWith("v")) {
+            $version = "v$version"
+          }
+          $versionNoV = $version.Substring(1)
+
+          $luaskillRunner = Normalize-Runner -Runner $env:INPUT_LUASKILL_RUNNER -Default "ubuntu-latest"
+          $buildLuaskill = if ($env:INPUT_BUILD_LUASKILL -eq "off" -or $luaskillRunner -eq "off") { "false" } else { "true" }
+
+          # Targets stores only the FFI platforms explicitly left enabled for this release run.
+          # Targets 仅保存本次发布明确启用的 FFI 平台。
+          $targets = [System.Collections.Generic.List[object]]::new()
+          Add-FfiTarget -Targets $targets -Platform "linux-x64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_X64_RUNNER -Default "ubuntu-latest") -RustTarget "x86_64-unknown-linux-gnu" -LibraryPath "target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so"
+          Add-FfiTarget -Targets $targets -Platform "linux-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_ARM64_RUNNER -Default "ubuntu-24.04-arm") -RustTarget "aarch64-unknown-linux-gnu" -LibraryPath "target/aarch64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so"
+          Add-FfiTarget -Targets $targets -Platform "macos-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_ARM64_RUNNER -Default "macos-14") -RustTarget "aarch64-apple-darwin" -LibraryPath "target/aarch64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib"
+          Add-FfiTarget -Targets $targets -Platform "macos-x64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_X64_RUNNER -Default "macos-15-intel") -RustTarget "x86_64-apple-darwin" -LibraryPath "target/x86_64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib"
+          Add-FfiTarget -Targets $targets -Platform "windows-x64" -Runner (Normalize-Runner -Runner $env:INPUT_WINDOWS_X64_RUNNER -Default "windows-latest") -RustTarget "x86_64-pc-windows-msvc" -LibraryPath "target/x86_64-pc-windows-msvc/release/vulcan_codekit_ast_grep_ffi.dll"
+
+          $matrixJson = @{ include = @($targets) } | ConvertTo-Json -Compress -Depth 5
+          $hasFfiTargets = if ($targets.Count -gt 0) { "true" } else { "false" }
+          $hasWork = if ($buildLuaskill -eq "true" -or $hasFfiTargets -eq "true") { "true" } else { "false" }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version_no_v=$versionNoV" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "luaskill_runner=$luaskillRunner" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "build_luaskill=$buildLuaskill" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ffi_matrix=$matrixJson" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "has_ffi_targets=$hasFfiTargets" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "has_work=$hasWork" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+  no-work-selected:
+    name: No Enabled Release Work
+    needs: prepare-release
+    if: needs.prepare-release.outputs.has_work != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report skipped release
+        shell: bash
+        run: |
+          echo "LuaSkill packaging is off and all FFI runners are off. Nothing to publish."
+
+  create-release:
+    name: Ensure GitHub Release
+    needs: prepare-release
+    if: needs.prepare-release.outputs.has_work == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare-release.outputs.version }}
+          name: Vulcan CodeKit ${{ needs.prepare-release.outputs.version }}
+          body: |
+            Vulcan CodeKit LuaSkill release ${{ needs.prepare-release.outputs.version }}.
+
+            - Skill package assets follow the managed LuaSkill GitHub release naming rules.
+            - ast-grep FFI assets are installed by dependencies.yaml from this same release.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-luaskill:
+    name: Build LuaSkill Package
+    needs:
+      - prepare-release
+      - create-release
+    if: needs.prepare-release.outputs.build_luaskill == 'true'
+    runs-on: >-
+      ${{
+        (startsWith(needs.prepare-release.outputs.luaskill_runner, 'ubuntu') || startsWith(needs.prepare-release.outputs.luaskill_runner, 'macos') || startsWith(needs.prepare-release.outputs.luaskill_runner, 'windows'))
+        && fromJSON(format('["{0}"]', needs.prepare-release.outputs.luaskill_runner))
+        || fromJSON(format('["self-hosted", "{0}"]', needs.prepare-release.outputs.luaskill_runner))
+      }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,42 +213,33 @@ jobs:
       - name: Validate strict skill layout
         run: python ./scripts/validate_skill.py
 
-      - name: Build release package
-        run: python ./scripts/package_skill.py
+      - name: Build skill package
+        run: python ./scripts/package_skill.py --version ${{ needs.prepare-release.outputs.version_no_v }}
 
-      - name: Upload skill release artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload LuaSkill release assets
+        uses: softprops/action-gh-release@v2
         with:
-          name: codekit-skill-release
-          path: dist/*
+          files: dist/*
+          tag_name: ${{ needs.prepare-release.outputs.version }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-ffi:
     name: Build FFI ${{ matrix.platform }}
-    runs-on: ${{ matrix.runner }}
+    needs:
+      - prepare-release
+      - create-release
+    if: needs.prepare-release.outputs.has_ffi_targets == 'true'
+    runs-on: >-
+      ${{
+        (startsWith(matrix.runner, 'ubuntu') || startsWith(matrix.runner, 'macos') || startsWith(matrix.runner, 'windows'))
+        && fromJSON(format('["{0}"]', matrix.runner))
+        || fromJSON(format('["self-hosted", "{0}"]', matrix.runner))
+      }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: windows-x64
-            runner: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            library_path: target/x86_64-pc-windows-msvc/release/vulcan_codekit_ast_grep_ffi.dll
-          - platform: linux-x64
-            runner: ubuntu-latest
-            rust_target: x86_64-unknown-linux-gnu
-            library_path: target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so
-          - platform: linux-arm64
-            runner: ubuntu-24.04-arm
-            rust_target: aarch64-unknown-linux-gnu
-            library_path: target/aarch64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so
-          - platform: macos-arm64
-            runner: macos-14
-            rust_target: aarch64-apple-darwin
-            library_path: target/aarch64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib
-          - platform: macos-x64
-            runner: macos-15-intel
-            rust_target: x86_64-apple-darwin
-            library_path: target/x86_64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib
+      matrix: ${{ fromJSON(needs.prepare-release.outputs.ffi_matrix) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -83,26 +260,11 @@ jobs:
       - name: Package ast-grep FFI
         run: python ./scripts/package_ffi.py --platform ${{ matrix.platform }} --library-path ${{ matrix.library_path }}
 
-      - name: Upload FFI release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ast-grep-ffi-${{ matrix.platform }}
-          path: dist/*
-
-  publish:
-    name: Publish GitHub release
-    needs:
-      - build-skill
-      - build-ffi
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Publish GitHub release assets
+      - name: Upload FFI release assets
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          tag_name: ${{ needs.prepare-release.outputs.version }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -31,10 +31,23 @@ def resolve_required_file(value: str) -> Path:
 
 
 """
+Return repository license and notice files that must travel with FFI binaries.
+返回应随 FFI 二进制一起分发的仓库许可证与声明文件。
+"""
+def collect_license_files(root: Path) -> list[Path]:
+    license_names = [
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "THIRD_PARTY_LICENSES.md",
+    ]
+    return [root / name for name in license_names if (root / name).is_file()]
+
+
+"""
 Build one platform-specific FFI zip and checksum file.
 构建一个平台专属 FFI zip 与校验文件。
 """
-def build_ffi_package(out_dir: Path, platform: str, library_path: Path) -> tuple[Path, Path]:
+def build_ffi_package(root: Path, out_dir: Path, platform: str, library_path: Path) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     package_name = f"ast-grep-ffi-{platform}.zip"
     checksum_name = f"ast-grep-ffi-{platform}.sha256.txt"
@@ -43,6 +56,8 @@ def build_ffi_package(out_dir: Path, platform: str, library_path: Path) -> tuple
 
     with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
         archive.write(library_path, library_path.name)
+        for notice_path in collect_license_files(root):
+            archive.write(notice_path, f"licenses/{notice_path.name}")
 
     digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
     checksum_path.write_text(f"{digest}  {package_name}\n", encoding="utf-8")
@@ -70,7 +85,7 @@ def main() -> int:
     root = repo_root()
     out_dir = (root / args.out_dir).resolve()
     library_path = resolve_required_file(args.library_path)
-    package_path, checksum_path = build_ffi_package(out_dir, args.platform, library_path)
+    package_path, checksum_path = build_ffi_package(root, out_dir, args.platform, library_path)
     print(f"FFI package created: {package_path}")
     print(f"FFI checksum created: {checksum_path}")
     return 0
