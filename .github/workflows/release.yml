@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag (e.g. v0.1.0)"
+        description: "Release tag (e.g. v0.1.1)"
         required: true
-        default: "v0.1.0"
+        default: "v0.1.1"
       build_luaskill:
         description: "Build LuaSkill package"
         required: true
@@ -126,7 +126,7 @@ jobs:
             })
           }
 
-          $version = Normalize-Runner -Runner $env:INPUT_VERSION -Default "v0.1.0"
+          $version = Normalize-Runner -Runner $env:INPUT_VERSION -Default "v0.1.1"
           if (-not $version.StartsWith("v")) {
             $version = "v$version"
           }

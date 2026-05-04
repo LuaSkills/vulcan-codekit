@@ -154,6 +154,8 @@
 
 对大型仓库来说，这不是小优化，而是效率量级差。
 
+`rg_pattern` 默认使用 ripgrep 的 Rust regex 引擎。只有当模式需要 look-around 或 backreference 等 PCRE2 特性时，才把 `regex_engine` 设为 `pcre2`。可选的 `extensions` 过滤参数接受逗号分隔扩展名或语言名；未传时使用 `skill.yaml` 中声明的精确默认源码扩展集合，并排除 css、html、json、yaml/yml、hcl/tf/tfvars 和 md 等非核心格式。
+
 ### `vulcan-codekit-markdown-menu`
 
 先看文档标题树，再决定读正文。
@@ -166,13 +168,13 @@
 
 ### `vulcan-codekit-node-source`
 
-当 `ast-detail` 或 `rg` 已经确认目标函数/方法后，按结构 selector 直接取回一个或多个节点的完整源码，支持跨文件批量读取。
+当 `ast-detail` 或 `rg` 已经确认目标函数/方法后，按 `structural_path` 直接取回一个或多个节点的完整源码，支持跨文件批量读取。
 
 它会返回：
 
 - 命中的文件
-- selector 数量
-- 每个 selector
+- structural_path 数量
+- 每个 `structural_path`
 - 函数/方法签名
 - 行号范围
 - 完整节点源码
@@ -188,19 +190,21 @@
 
 节点读取统一使用 `nodes[]`：
 
-- 每个节点项都携带自己的 `file` 与 `selector`
+- 每个节点项都携带自己的 `file` 与 `structural_path`
 - 同文件多节点时重复同一个 `file`
-- 如果更紧凑，也可以在单个节点项的 `selector` 中按行写多个 selector
+- 如果更紧凑，也可以在单个节点项的 `structural_path` 中按行写多个结构路径
 - 跨文件多节点直接在不同节点项中写不同 `file`
 
-它会部分成功返回，不会因为某个 selector 未命中、歧义、文件不存在或 selector 格式错误就丢掉所有已成功提取的节点；单节点问题会以 `status: error` 和 `node_index` 标出。
+`structural_path` 是斜杠分隔的结构路径后缀，不是正则或 glob。示例包括 `main`、`UserService/get_user`、`impl MyType/new`、`impl MyTrait for MyType/run`。
+
+它会部分成功返回，不会因为某个 structural_path 未命中、歧义、文件不存在或格式错误就丢掉所有已成功提取的节点；单节点问题会以 `status: error` 和 `node_index` 标出。
 默认最多处理 20 个节点，重复命中同一节点会标记为 `duplicate`，超过上限的请求会标记为 `skipped`。
 
 ### `vulcan-codekit-patch`
 
 当目标已经明确到函数级别后，用结构化方式替换一个或多个函数/方法。
 
-它不是“随便文本替换”，而是围绕 AST 目标做完整函数/方法替换：先用 selector 定位目标，再写入替换内容，最后重新扫描 AST 并拒绝引入解析错误节点的结果。批量模式下默认 `atomic=true`，任一 patch 未命中、歧义、stale、replacement 不是完整函数或同文件范围重叠，整批都会在写入前被拒绝。
+它不是“随便文本替换”，而是围绕 AST 目标做完整函数/方法替换：先用 `structural_path` 定位目标，再写入替换内容，最后重新扫描 AST 并拒绝引入解析错误节点的结果。单条模式和批量模式互斥：只能使用顶层 `file`/`structural_path`/`replacement`，或使用非空 `patches[]`，不能混传。批量模式下默认 `atomic=true`，任一 patch 未命中、歧义、stale、replacement 不是完整函数或同文件范围重叠，整批都会在写入前被拒绝。
 
 适合：
 
@@ -213,11 +217,11 @@
 
 - 不用于零散局部文本替换
 - `replacement` 必须是完整函数或方法源码
-- 批量输入使用 `patches = [{ file, selector, replacement }, ...]`
-- 可传入 `expected_node_hash`、`expected_source_hash`、`expected_file_hash`、`expected_range` 做 stale check
+- 批量输入使用 `patches = [{ file, structural_path, replacement }, ...]`
+- 可传入 `precondition = { node_hash, file_hash, range }` 做 stale check
 - 成功结果会区分 `previous_node_hash` 与 `new_node_hash`，后续 stale check 应使用 `new_node_hash`
 - stale 拒绝会返回对应的 expected/actual 诊断字段，便于调用方判断当前源码状态
-- selector 如果命中多个候选，会返回候选而不是盲目修改
+- structural_path 如果命中多个候选，会返回候选而不是盲目修改
 
 ## 一套更适合 Agent 的代码工作流
 
@@ -381,7 +385,7 @@
 repo: LuaSkills/vulcan-codekit
 ```
 
-GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持手动运行。运行时填写 `version`，例如 `v0.1.0`，然后按需选择：
+GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持手动运行。运行时填写 `version`，例如 `v0.1.1`，然后按需选择：
 
 - `build_luaskill=on/off`：是否构建并上传 LuaSkill 技能包
 - `luaskill_runner`：技能包构建 runner

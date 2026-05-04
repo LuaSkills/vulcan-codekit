@@ -154,6 +154,8 @@ can all be traced back to the real owner very quickly.
 
 For large repositories, this is not a small improvement. It is a change in efficiency class.
 
+`rg_pattern` uses ripgrep's Rust regex engine by default. Set `regex_engine` to `pcre2` only when the pattern needs PCRE2 features such as look-around or backreferences. The optional `extensions` filter accepts comma-separated extensions or language names; when omitted, CodeKit scans the exact default source-code set declared in `skill.yaml`, excluding non-core formats such as css, html, json, yaml/yml, hcl/tf/tfvars, and md.
+
 ### `vulcan-codekit-markdown-menu`
 
 Read the document heading tree first, then decide which body text to open.
@@ -166,13 +168,13 @@ It is useful for:
 
 ### `vulcan-codekit-node-source`
 
-After `ast-detail` or `rg` has confirmed a target function or method, this reads the complete source of one or more nodes by structural selector, including cross-file batches.
+After `ast-detail` or `rg` has confirmed a target function or method, this reads the complete source of one or more nodes by `structural_path`, including cross-file batches.
 
 It returns:
 
 - Matched file
-- Selector count
-- Each selector
+- Structural path count
+- Each `structural_path`
 - Function or method signature
 - Line range
 - Complete node source
@@ -188,12 +190,14 @@ Useful for:
 
 Node reads consistently use `nodes[]`:
 
-- Each node item carries its own `file` and `selector`
+- Each node item carries its own `file` and `structural_path`
 - For multiple nodes in the same file, repeat the same `file`
-- For a more compact form, put multiple selectors in one node item's `selector`, separated by lines
+- For a more compact form, put multiple structural paths in one node item's `structural_path`, separated by lines
 - For cross-file reads, use different `file` values in different node items
 
-It returns partial success. A missing selector, ambiguous selector, missing file, or invalid selector format does not discard every successful node. Single-node issues are reported with `status: error` and `node_index`.
+`structural_path` is a slash-separated structural path suffix, not a regex or glob. Examples include `main`, `UserService/get_user`, `impl MyType/new`, and `impl MyTrait for MyType/run`.
+
+It returns partial success. A missing structural path, ambiguous structural path, missing file, or invalid structural path format does not discard every successful node. Single-node issues are reported with `status: error` and `node_index`.
 
 By default, it processes up to 20 nodes. Repeated hits to the same node are marked as `duplicate`, and requests beyond the limit are marked as `skipped`.
 
@@ -201,7 +205,7 @@ By default, it processes up to 20 nodes. Repeated hits to the same node are mark
 
 Once the target is known at function level, this replaces one or more functions or methods structurally.
 
-It is not "casual text replacement". It performs complete function or method replacement around AST targets: locate the target by selector, write the replacement, rescan the AST, and reject results that introduce parse-error nodes. In batch mode, `atomic=true` is the default. If any patch is missing, ambiguous, stale, not a complete function replacement, or overlaps another range in the same file, the entire batch is rejected before writing.
+It is not "casual text replacement". It performs complete function or method replacement around AST targets: locate the target by `structural_path`, write the replacement, rescan the AST, and reject results that introduce parse-error nodes. Single mode and batch mode are mutually exclusive: use either top-level `file`/`structural_path`/`replacement` or non-empty `patches[]`, not both. In batch mode, `atomic=true` is the default. If any patch is missing, ambiguous, stale, not a complete function replacement, or overlaps another range in the same file, the entire batch is rejected before writing.
 
 Useful for:
 
@@ -214,11 +218,11 @@ Its boundaries are also clear:
 
 - It is not for scattered local text replacements
 - `replacement` must be complete function or method source
-- Batch input uses `patches = [{ file, selector, replacement }, ...]`
-- You can pass `expected_node_hash`, `expected_source_hash`, `expected_file_hash`, and `expected_range` for stale checks
+- Batch input uses `patches = [{ file, structural_path, replacement }, ...]`
+- You can pass `precondition = { node_hash, file_hash, range }` for stale checks
 - Successful results distinguish `previous_node_hash` from `new_node_hash`; later stale checks should use `new_node_hash`
 - Stale rejections return expected and actual diagnostic fields so callers can judge the current source state
-- If a selector matches multiple candidates, candidates are returned instead of modifying blindly
+- If a structural path matches multiple candidates, candidates are returned instead of modifying blindly
 
 ## A More Agent-friendly Code Workflow
 
@@ -382,7 +386,7 @@ The top-level directory inside the zip archive must be the runtime skill name:
 repo: LuaSkills/vulcan-codekit
 ```
 
-The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports manual runs. Provide `version`, for example `v0.1.0`, and then choose options as needed:
+The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports manual runs. Provide `version`, for example `v0.1.1`, and then choose options as needed:
 
 - `build_luaskill=on/off`: whether to build and upload the LuaSkill package
 - `luaskill_runner`: runner used to build the skill package
