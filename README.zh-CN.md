@@ -385,13 +385,13 @@
 repo: LuaSkills/vulcan-codekit
 ```
 
-GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持手动运行。运行时填写 `version`，例如 `v0.1.1`，然后按需选择：
+GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push 与手动运行。发布版本会从 `skill.yaml` 自动读取；手动 `version` 输入是可选的，且只有与 `v{skill.yaml.version}` 一致时才允许使用。
 
 - `build_luaskill=on/off`：是否构建并上传 LuaSkill 技能包
 - `luaskill_runner`：技能包构建 runner
 - 各平台 `*_runner`：对应 FFI 平台 runner，设为 `off` 即跳过该平台
 
-LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；只要 `version` 相同，所有启用的产物都会上传到同一个 GitHub Release。运行时安装 FFI 组件时，LuaSkills 依赖管理器会根据 `dependencies.yaml` 中的 `version`、`repo` 与平台 `asset_name` 解析同一个 Release 下的对应资产。
+LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；只要 release tag 与 `skill.yaml.version` 一致，所有启用的产物都会上传到同一个 GitHub Release。运行时安装 FFI 组件时，LuaSkills 依赖管理器会根据 `dependencies.yaml` 中的 `version`、`repo` 与平台 `asset_name` 解析同一个 Release 下的对应资产。
 
 Rust FFI 依赖许可证报告由 `cargo-deny` 自动生成：
 

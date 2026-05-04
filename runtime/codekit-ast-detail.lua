@@ -63,7 +63,7 @@ local load_shared_length_helpers
 local AST_GREP_FFI_CLIENT = nil
 local AST_GREP_FFI_CDEF_REGISTERED = false
 local AST_GREP_FFI_DEPENDENCY_NAME = "ast-grep-ffi"
-local AST_GREP_FFI_VERSION = "0.1.1"
+local AST_GREP_FFI_VERSION = "0.1.2"
 local DEFAULT_SOURCE_LANGUAGES = {
     bash = true,
     c = true,

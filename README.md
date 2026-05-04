@@ -386,13 +386,13 @@ The top-level directory inside the zip archive must be the runtime skill name:
 repo: LuaSkills/vulcan-codekit
 ```
 
-The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports manual runs. Provide `version`, for example `v0.1.1`, and then choose options as needed:
+The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports tag pushes and manual runs. The release version is read from `skill.yaml`; an optional manual `version` input may be provided only when it matches `v{skill.yaml.version}`.
 
 - `build_luaskill=on/off`: whether to build and upload the LuaSkill package
 - `luaskill_runner`: runner used to build the skill package
 - Platform-specific `*_runner` values: runner for each FFI platform, or `off` to skip that platform
 
-LuaSkill package builds and FFI native component builds can be run separately. As long as `version` is the same, all enabled artifacts are uploaded to the same GitHub Release. During runtime installation of FFI components, the LuaSkills dependency manager resolves the matching asset from the same Release according to the `version`, `repo`, and platform `asset_name` values in `dependencies.yaml`.
+LuaSkill package builds and FFI native component builds can be run separately. As long as the release tag matches `skill.yaml.version`, all enabled artifacts are uploaded to the same GitHub Release. During runtime installation of FFI components, the LuaSkills dependency manager resolves the matching asset from the same Release according to the `version`, `repo`, and platform `asset_name` values in `dependencies.yaml`.
 
 The Rust FFI dependency license report is generated automatically by `cargo-deny`:
 
