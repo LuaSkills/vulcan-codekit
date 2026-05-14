@@ -642,6 +642,7 @@ local function run_rg_command(rg_binary_path, arguments)
         local ok, result = pcall(host_exec, {
             program = rg_binary_path,
             args = arguments,
+            encoding = "utf-8",
             timeout_ms = RG_TIMEOUT_MS,
         })
         if ok and type(result) == "table" then
@@ -703,30 +704,45 @@ local function parse_rg_json_output(output, stderr_text)
     local total_matches = 0
     local diagnostics = {}
 
-    for _, raw_line in ipairs(split_lines(output or "")) do
+    for line_index, raw_line in ipairs(split_lines(output or "")) do
         local current = trim(raw_line)
         if current ~= "" then
-            local decoded, decode_error = vulcan.json.decode(current)
-            if not decoded then
-                table.insert(diagnostics, "rg_json_decode_error: " .. tostring(decode_error))
-            elseif decoded.type == "match" then
-                local data = decoded.data or {}
-                local file_path = trim(((data.path or {}).text) or "")
-                local line_number = tonumber(data.line_number) or 0
-                local line_text = tostring(((data.lines or {}).text) or ""):gsub("[\r\n]+$", "")
-                if file_path ~= "" and line_number > 0 then
-                    hits_by_file[file_path] = hits_by_file[file_path] or {}
-                    table.insert(hits_by_file[file_path], {
-                        line = line_number,
-                        text = line_text,
-                        submatches = (data.submatches or {}),
-                    })
-                    total_matches = total_matches + 1
-                end
-            elseif decoded.type == "summary" then
-                local stats = ((decoded.data or {}).stats) or {}
-                if tonumber(stats.matches) and tonumber(stats.matches) > total_matches then
-                    total_matches = tonumber(stats.matches)
+            local decode_ok, decoded_or_error = pcall(vulcan.json.decode, current)
+            if not decode_ok then
+                table.insert(
+                    diagnostics,
+                    string.format("rg_json_decode_error[L%d]: %s", line_index, tostring(decoded_or_error))
+                )
+            else
+                local decoded = decoded_or_error
+                if type(decoded) ~= "table" then
+                    table.insert(
+                        diagnostics,
+                        string.format(
+                            "rg_json_decode_error[L%d]: decoded value is %s instead of table",
+                            line_index,
+                            type(decoded)
+                        )
+                    )
+                elseif decoded.type == "match" then
+                    local data = decoded.data or {}
+                    local file_path = trim(((data.path or {}).text) or "")
+                    local line_number = tonumber(data.line_number) or 0
+                    local line_text = tostring(((data.lines or {}).text) or ""):gsub("[\r\n]+$", "")
+                    if file_path ~= "" and line_number > 0 then
+                        hits_by_file[file_path] = hits_by_file[file_path] or {}
+                        table.insert(hits_by_file[file_path], {
+                            line = line_number,
+                            text = line_text,
+                            submatches = (data.submatches or {}),
+                        })
+                        total_matches = total_matches + 1
+                    end
+                elseif decoded.type == "summary" then
+                    local stats = ((decoded.data or {}).stats) or {}
+                    if tonumber(stats.matches) and tonumber(stats.matches) > total_matches then
+                        total_matches = tonumber(stats.matches)
+                    end
                 end
             end
         end
