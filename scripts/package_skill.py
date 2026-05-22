@@ -109,6 +109,7 @@ def collect_package_paths(root: Path) -> list[Path]:
         "help",
         "overflow_templates",
         "rules",
+        "schemas",
         "skills",
     }
 

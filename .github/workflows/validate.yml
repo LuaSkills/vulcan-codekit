@@ -45,6 +45,8 @@ jobs:
               raise SystemExit("LuaSkill package must contain a vulcan-codekit/ root directory")
           if any(name.startswith("luaskills-vulcan-codekit/") for name in names):
               raise SystemExit("LuaSkill package must not contain a luaskills-vulcan-codekit/ root directory")
+          if not any(name.startswith("vulcan-codekit/schemas/") for name in names):
+              raise SystemExit("LuaSkill package must contain the schemas/ directory contents")
 
       - name: Check ast-grep FFI dependency licenses
         run: cargo deny check -c deny.toml --exclude-dev licenses

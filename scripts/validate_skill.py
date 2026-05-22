@@ -69,6 +69,7 @@ def validate_layout(root: Path) -> None:
         root / "help",
         root / "overflow_templates",
         root / "rules",
+        root / "schemas",
         root / "skills",
     ]
 

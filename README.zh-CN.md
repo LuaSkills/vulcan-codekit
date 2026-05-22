@@ -339,6 +339,7 @@
 
 - `runtime/`：LuaSkill 工具入口与共享运行时代码
 - `rules/`：按语言拆分的 ast-grep 结构匹配规则
+- `schemas/`：复杂 AI 工具输入使用的外部 JSON Schema 文件
 - `help/`：严格帮助流与各工具说明
 - `skills/`：Codex 技能说明与 Agent 使用指引
 - `ast-grep-ffi/`：基于 Rust 的 ast-grep FFI 动态库项目
@@ -346,7 +347,7 @@
 
 仓库不再作为 demo skill 维护，而是作为 `vulcan-codekit` 的发布源。发布时会生成两类产物：
 
-- LuaSkill 包：包含 `runtime/`、`rules/`、`help/`、`skills/`、`dependencies.yaml` 等运行所需文件
+- LuaSkill 包：包含 `runtime/`、`rules/`、`schemas/`、`help/`、`skills/`、`dependencies.yaml` 等运行所需文件
 - FFI 组件包：包含平台对应的 `vulcan_codekit_ast_grep_ffi` 动态库
 
 ## 依赖与发布产物
