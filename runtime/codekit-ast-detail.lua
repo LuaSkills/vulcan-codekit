@@ -63,7 +63,7 @@ local load_shared_length_helpers
 local AST_GREP_FFI_CLIENT = nil
 local AST_GREP_FFI_CDEF_REGISTERED = false
 local AST_GREP_FFI_DEPENDENCY_NAME = "ast-grep-ffi"
-local AST_GREP_FFI_VERSION = "0.1.6"
+local AST_GREP_FFI_VERSION = "0.1.7"
 local DEFAULT_SOURCE_LANGUAGES = {
     bash = true,
     c = true,
@@ -1811,7 +1811,7 @@ local function infer_name_from_header(symbol_kind, header)
             "^def%s+([%w_!?]+)%s*%(",
             "^func%s*%b()%s*([%w_]+)%s*%(",
             "^func%s+([%w_]+)%s*%(",
-            "^fn%s+([%w_]+)%s*%(",
+            "fn%s+([%w_]+)%s*%(",
             "^([%w_%.:]+)%s*=%s*function%s*%(",
             "^([%w_%.:]+)%s*=%s*%b()%s*=>",
             "^([%w_%.:]+)%s*=%s*[%w_]+%s*=>",
@@ -1820,7 +1820,7 @@ local function infer_name_from_header(symbol_kind, header)
         impl = { "^impl%s+([%w_%.:<>]+)" },
         interface = { "^interface%s+([%w_%.:<>]+)", "^type%s+([%w_%.:<>]+)%s+interface" },
         library = { "^library%s+([%w_%.:<>]+)" },
-        method = { "^function%s+([%w_%.:]+)%s*%(", "^def%s+([%w_!?]+)%s*%(", "^func%s*%b()%s*([%w_]+)%s*%(", "^fn%s+([%w_]+)%s*%(", "([%w_]+)%s*%(" },
+        method = { "^function%s+([%w_%.:]+)%s*%(", "^def%s+([%w_!?]+)%s*%(", "^func%s*%b()%s*([%w_]+)%s*%(", "fn%s+([%w_]+)%s*%(", "([%w_]+)%s*%(" },
         module = { "^module%s+([%w_%.:<>]+)", "^defmodule%s+([%w_%.:<>]+)" },
         namespace = { "^namespace%s+([%w_%.:<>]+)" },
         object = { "^object%s+([%w_%.:<>]+)" },

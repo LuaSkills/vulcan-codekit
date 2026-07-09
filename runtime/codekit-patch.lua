@@ -762,6 +762,294 @@ local function join_file_lines(lines, newline, has_trailing_newline)
     return text
 end
 
+-- Resolve the current host structured-result capability for optional change-set output.
+-- 解析当前宿主结构化结果能力，用于可选 change-set 输出。
+--
+-- Parameters:
+--     None.
+-- 参数：
+--     无。
+--
+-- Returns:
+--     table: Capability snapshot with enabled, allows_change_set, and max_payload_bytes fields.
+-- 返回值：
+--     table：包含 enabled、allows_change_set 与 max_payload_bytes 字段的能力快照。
+local function resolve_host_result_capability()
+    local host_result = nil
+    if vulcan and vulcan.context and type(vulcan.context.host_result) == "table" then
+        host_result = vulcan.context.host_result
+    end
+
+    local enabled = type(host_result) == "table" and host_result.enabled == true
+    local allowed_kinds = type(host_result) == "table" and host_result.allowed_kinds or nil
+    local allow_change_set = true
+    if type(allowed_kinds) == "table" then
+        local saw_any = false
+        allow_change_set = false
+        for _, item in ipairs(allowed_kinds) do
+            if type(item) == "string" and trim(item) ~= "" then
+                saw_any = true
+                if trim(item) == "change_set" then
+                    allow_change_set = true
+                end
+            end
+        end
+        if not saw_any then
+            allow_change_set = true
+        end
+    end
+
+    local max_payload_bytes = nil
+    if type(host_result) == "table" then
+        local numeric_limit = tonumber(host_result.max_payload_bytes)
+        if numeric_limit and numeric_limit > 0 then
+            max_payload_bytes = math.floor(numeric_limit)
+        end
+    end
+
+    return {
+        enabled = enabled,
+        allows_change_set = enabled and allow_change_set,
+        max_payload_bytes = max_payload_bytes,
+    }
+end
+
+-- Finalize one optional host change-set result after capability and payload-size checks.
+-- 在能力与载荷大小检查通过后完成一个可选宿主 change-set 结果。
+--
+-- Parameters:
+--     capability: Capability snapshot from resolve_host_result_capability.
+--     payload: Candidate change-set payload object.
+-- 参数：
+--     capability：来自 resolve_host_result_capability 的能力快照。
+--     payload：候选 change-set 载荷对象。
+--
+-- Returns:
+--     table|nil: Host result wrapper when accepted, otherwise nil.
+-- 返回值：
+--     table|nil：被接受时返回宿主结果包装对象，否则返回 nil。
+local function finalize_change_set_host_result(capability, payload)
+    if type(capability) ~= "table" or capability.enabled ~= true or capability.allows_change_set ~= true then
+        return nil
+    end
+    if type(payload) ~= "table" then
+        return nil
+    end
+    if capability.max_payload_bytes ~= nil and vulcan and vulcan.json and type(vulcan.json.encode) == "function" then
+        local ok, encoded = pcall(vulcan.json.encode, payload)
+        if not ok or type(encoded) ~= "string" then
+            return nil
+        end
+        if #encoded > capability.max_payload_bytes then
+            return nil
+        end
+    end
+    return {
+        kind = "change_set",
+        payload = payload,
+    }
+end
+
+-- Build a contiguous context string from one logical line table.
+-- 从一个逻辑行表构造连续上下文字符串。
+--
+-- Parameters:
+--     lines: Source logical line table.
+--     start_line: First 1-based line to include.
+--     end_line: Last 1-based line to include.
+--     newline: Newline sequence used to rejoin lines.
+-- 参数：
+--     lines：源逻辑行表。
+--     start_line：需要包含的首个 1-based 行号。
+--     end_line：需要包含的最后一个 1-based 行号。
+--     newline：重新拼接时使用的换行序列。
+--
+-- Returns:
+--     string: Joined context string, or an empty string when no lines are selected.
+-- 返回值：
+--     string：拼接后的上下文字符串；未选中任何行时返回空字符串。
+local function build_context_string(lines, start_line, end_line, newline)
+    if not lines or #lines == 0 then
+        return ""
+    end
+    local safe_start = math.max(1, start_line or 1)
+    local safe_end = math.min(#lines, end_line or 0)
+    if safe_start > safe_end then
+        return ""
+    end
+    local buffer = {}
+    for line_number = safe_start, safe_end do
+        table.insert(buffer, lines[line_number] or "")
+    end
+    return table.concat(buffer, newline or "\n")
+end
+
+-- Build ordered line entries for a closed logical line range.
+-- 为闭合逻辑行区间构造有序行记录。
+--
+-- Parameters:
+--     lines: Source logical line table.
+--     start_line: First 1-based line to include.
+--     end_line: Last 1-based line to include.
+-- 参数：
+--     lines：源逻辑行表。
+--     start_line：需要包含的首个 1-based 行号。
+--     end_line：需要包含的最后一个 1-based 行号。
+--
+-- Returns:
+--     table: Array-style ordered line entry list.
+-- 返回值：
+--     table：数组形式的有序行记录列表。
+local function build_line_entries(lines, start_line, end_line)
+    local output = {}
+    if not lines or #lines == 0 then
+        return output
+    end
+    local safe_start = math.max(1, start_line or 1)
+    local safe_end = math.min(#lines, end_line or 0)
+    if safe_start > safe_end then
+        return output
+    end
+    for line_number = safe_start, safe_end do
+        table.insert(output, {
+            line = line_number,
+            content = tostring(lines[line_number] or ""),
+        })
+    end
+    return output
+end
+
+-- Build one canonical change-set hunk for a structurally patched node.
+-- 为一个结构化 patch 节点构造 canonical change-set hunk。
+--
+-- Parameters:
+--     record: Validated patch record for one target file.
+--     plan: Patch plan that owns the original symbol range.
+-- 参数：
+--     record：单个目标文件的已校验 patch 记录。
+--     plan：拥有原始符号范围的 patch 计划。
+--
+-- Returns:
+--     table|nil: Canonical hunk table when the patched node can be mapped.
+-- 返回值：
+--     table|nil：可映射 patch 节点时返回 canonical hunk 表。
+local function build_patch_change_set_hunk(record, plan)
+    local original_lines = record.original_lines or {}
+    local new_lines = record.new_lines or {}
+    local newline = record.newline or "\n"
+    local relocated = record.relocated_by_index and record.relocated_by_index[plan.patch_index] or plan.symbol
+    if type(relocated) ~= "table" then
+        return nil
+    end
+
+    local original_start = tonumber(plan.symbol and plan.symbol.start_line) or 1
+    local original_end = tonumber(plan.symbol and plan.symbol.end_line) or original_start
+    local edited_start = tonumber(relocated.start_line) or original_start
+    local edited_end = tonumber(relocated.end_line) or edited_start
+
+    return {
+        before = build_context_string(original_lines, original_start - 3, original_start - 1, newline),
+        delete = build_line_entries(original_lines, original_start, original_end),
+        insert = build_line_entries(new_lines, edited_start, edited_end),
+        after = build_context_string(new_lines, edited_end + 1, edited_end + 3, newline),
+    }
+end
+
+-- Build one canonical modify file record for host change-set output.
+-- 为宿主 change-set 输出构造一个 canonical modify 文件记录。
+--
+-- Parameters:
+--     record: Validated and committed patch record for one target file.
+-- 参数：
+--     record：单个目标文件的已校验且已提交 patch 记录。
+--
+-- Returns:
+--     table|nil: Canonical change-set file record when at least one hunk exists.
+-- 返回值：
+--     table|nil：至少存在一个 hunk 时返回 canonical change-set 文件记录。
+local function build_patch_change_set_file_record(record)
+    if type(record) ~= "table" then
+        return nil
+    end
+    local hunks = {}
+    local ordered_plans = clone_array(record.plans)
+    table.sort(ordered_plans, function(left, right)
+        return (left.symbol.start_line or 0) < (right.symbol.start_line or 0)
+    end)
+    for _, plan in ipairs(ordered_plans) do
+        local hunk = build_patch_change_set_hunk(record, plan)
+        if type(hunk) == "table" then
+            table.insert(hunks, hunk)
+        end
+    end
+    if #hunks == 0 then
+        return nil
+    end
+    return {
+        change = "modify",
+        path = tostring(record.file or ""),
+        hunks = hunks,
+    }
+end
+
+-- Build one optional host change-set result from committed patch records.
+-- 根据已提交的 patch 记录构造一个可选宿主 change-set 结果。
+--
+-- Parameters:
+--     capability: Capability snapshot from resolve_host_result_capability.
+--     summary_text: Human-readable change-set summary.
+--     records: Array-style committed patch records.
+-- 参数：
+--     capability：来自 resolve_host_result_capability 的能力快照。
+--     summary_text：人类可读的 change-set 摘要。
+--     records：数组形式的已提交 patch 记录。
+--
+-- Returns:
+--     table|nil: Host result wrapper when accepted, otherwise nil.
+-- 返回值：
+--     table|nil：被接受时返回宿主结果包装对象，否则返回 nil。
+local function build_patch_change_set_host_result(capability, summary_text, records)
+    local files = {}
+    for _, record in ipairs(records or {}) do
+        local file_record = build_patch_change_set_file_record(record)
+        if type(file_record) == "table" then
+            table.insert(files, file_record)
+        end
+    end
+    if #files == 0 then
+        return nil
+    end
+    return finalize_change_set_host_result(capability, {
+        mode = "applied",
+        summary = tostring(summary_text or ""),
+        files = files,
+    })
+end
+
+-- Format one host change-set summary from applied patch and file counts.
+-- 根据已应用 patch 数与文件数格式化宿主 change-set 摘要。
+--
+-- Parameters:
+--     applied_count: Number of applied patch requests.
+--     file_count: Number of modified files.
+-- 参数：
+--     applied_count：已应用的 patch 请求数量。
+--     file_count：被修改的文件数量。
+--
+-- Returns:
+--     string: Human-readable change-set summary.
+-- 返回值：
+--     string：人类可读的 change-set 摘要。
+local function format_change_set_summary(applied_count, file_count)
+    return string.format(
+        "Applied %d patch request%s across %d file%s.",
+        tonumber(applied_count) or 0,
+        tonumber(applied_count) == 1 and "" or "s",
+        tonumber(file_count) or 0,
+        tonumber(file_count) == 1 and "" or "s"
+    )
+end
+
 --[[
 收集单文件 AST 结构树，为 selector 匹配和 patch 提供结构上下文。
 Collect the AST tree for a single file to provide the structural context needed by selector matching and patch application.
@@ -1776,6 +2064,9 @@ local function create_validated_patch_record(file_path, plans, helper_bundle)
         backup_path = backup_path,
         plans = plans,
         original_raw = file_context.content.raw,
+        original_lines = file_context.content.lines,
+        new_lines = new_lines,
+        newline = file_context.content.newline,
         relocated_by_index = relocated_by_index,
         new_node_hash_by_index = new_node_hash_by_index,
     }, nil
@@ -2137,9 +2428,16 @@ local function execute_patch_batch(args, helper_bundle)
         end
         summary.status = "applied"
         summary.reason = "ok"
-        return render_patch_batch_result(summary, collect_ordered_results(results_by_index, #patch_requests))
+        local ordered_results = collect_ordered_results(results_by_index, #patch_requests)
+        local host_result = build_patch_change_set_host_result(
+            resolve_host_result_capability(),
+            format_change_set_summary(summary.applied, #records),
+            records
+        )
+        return render_patch_batch_result(summary, ordered_results), nil, nil, host_result
     end
 
+    local committed_records = {}
     for _, record in ipairs(records) do
         local commit_error = commit_patch_records({ record }, helper_bundle)
         if commit_error then
@@ -2170,6 +2468,7 @@ local function execute_patch_batch(args, helper_bundle)
                 }
                 summary.applied = summary.applied + 1
             end
+            table.insert(committed_records, record)
         end
     end
 
@@ -2182,7 +2481,13 @@ local function execute_patch_batch(args, helper_bundle)
     end
     summary.status = has_failure and "partial" or "applied"
     summary.reason = has_failure and "partial_application" or "ok"
-    return render_patch_batch_result(summary, collect_ordered_results(results_by_index, #patch_requests))
+    local ordered_results = collect_ordered_results(results_by_index, #patch_requests)
+    local host_result = build_patch_change_set_host_result(
+        resolve_host_result_capability(),
+        format_change_set_summary(summary.applied, #committed_records),
+        committed_records
+    )
+    return render_patch_batch_result(summary, ordered_results), nil, nil, host_result
 end
 
 -- 工具入口 / Tool entry point invoked by the MCP runtime.
