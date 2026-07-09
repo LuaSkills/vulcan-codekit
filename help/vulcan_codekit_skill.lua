@@ -98,7 +98,7 @@ CodeKit is the required default path for source-code analysis.
 - `vulcan-codekit-ast-tree` returns a grouped Markdown tree with compact metrics such as lines, types, impl blocks, and functions.
 - `vulcan-codekit-rg` returns matched lines together with the owning function, method, impl, or class context.
 - `vulcan-codekit-ast-detail` returns a structured symbol tree with nesting, signatures, and line ownership.
-- `vulcan-codekit-node-source` returns exact function or method sources, supports cross-file `nodes[]` batches, and declares host-managed `truncate` overflow mode.
+- `vulcan-codekit-node-source` returns exact current function or method sources for the paired whole-function patch workflow, supports cross-file `nodes[]` batches, and declares host-managed `truncate` overflow mode.
 - Tools return plain strings. If the result exceeds the current client budget, the MCP host decides whether to keep it inline, truncate it, or render it as a paged read directory.
 - When the host switches to page mode, you will receive a `raw_file` path together with host-safe line-based `offset` / `limit` read chunks. Follow that chunk plan directly.
 
@@ -187,7 +187,8 @@ Remember:
 - for same-file batches, repeat the same `file` in multiple node items
 - newline-separated structural paths are supported inside each node item's `structural_path` field
 - `structural_path` is a slash-separated structural path suffix, not a regex or glob
-- it only extracts function or method nodes, matching the patch target model
+- it is the normal read step before `vulcan-codekit-patch`
+- it only extracts function or method nodes; non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are outside this tool model
 - missing, ambiguous, or invalid nodes are reported per node with `node_index` instead of failing the whole call
 - `max_nodes` defaults to 20; duplicates and skipped requests are reported explicitly
 - the rendered output explicitly states `overflow_mode: truncate`
@@ -203,12 +204,14 @@ Remember:
 - prefer `patches[]` for related handler/helper/test changes
 - batch mode defaults to `atomic=true`
 - single mode and batch mode are mutually exclusive; do not mix top-level `file`/`structural_path`/`replacement` with non-empty `patches[]`
-- `replacement` must be the complete function source
+- use `vulcan-codekit-node-source` immediately before patching when you need current source text or stale-check hashes
+- `replacement` must be the complete function or method source; this is a whole-node workflow, not a partial edit tool
 - each patch item uses `structural_path`; it is a slash-separated structural path suffix, not a regex or glob
 - use `precondition = { node_hash, file_hash, range }` when patching from `node-source` output
 - after a successful patch, use `new_node_hash` rather than `previous_node_hash` for the next stale check
 - stale rejections include expected/actual diagnostics for the failed patch item
 - overlapping same-file targets are rejected
+- non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are not supported
 - do not use it for partial edits or scattered tweaks
 
 ## Typical Workflows

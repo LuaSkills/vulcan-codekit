@@ -168,7 +168,7 @@
 
 ### `vulcan-codekit-node-source`
 
-当 `ast-detail` 或 `rg` 已经确认目标函数/方法后，按 `structural_path` 直接取回一个或多个节点的完整源码，支持跨文件批量读取。
+当 `ast-detail` 或 `rg` 已经确认目标函数/方法后，按 `structural_path` 直接取回一个或多个节点的当前完整源码，支持跨文件批量读取。正常工作流里，这一步通常紧接在 `vulcan-codekit-patch` 之前。
 
 它会返回：
 
@@ -187,6 +187,7 @@
 - patch 前精读当前实现
 - review 一个或多个 owner 函数而不是整文件
 - 避免为了拿函数正文退回全文读取
+- 为后续整函数替换携带 `node_hash` / `file_hash`
 
 节点读取统一使用 `nodes[]`：
 
@@ -200,11 +201,17 @@
 它会部分成功返回，不会因为某个 structural_path 未命中、歧义、文件不存在或格式错误就丢掉所有已成功提取的节点；单节点问题会以 `status: error` 和 `node_index` 标出。
 默认最多处理 20 个节点，重复命中同一节点会标记为 `duplicate`，超过上限的请求会标记为 `skipped`。
 
+边界也很明确：
+
+- 它只返回函数/方法节点
+- `enum`、`enum variant/member`、结构字段、类型别名、语句级节点都不在这条工作流里
+- 它是整节点替换前的读取步骤，不是通用结构提取器
+
 ### `vulcan-codekit-patch`
 
-当目标已经明确到函数级别后，用结构化方式替换一个或多个函数/方法。
+当目标已经明确到函数级别后，用结构化方式替换一个或多个函数/方法。正常工作流里会先调用 `node-source`，基于返回的当前节点源码生成完整 replacement。
 
-它不是“随便文本替换”，而是围绕 AST 目标做完整函数/方法替换：先用 `structural_path` 定位目标，再写入替换内容，最后重新扫描 AST 并拒绝引入解析错误节点的结果。单条模式和批量模式互斥：只能使用顶层 `file`/`structural_path`/`replacement`，或使用非空 `patches[]`，不能混传。批量模式下默认 `atomic=true`，任一 patch 未命中、歧义、stale、replacement 不是完整函数或同文件范围重叠，整批都会在写入前被拒绝。
+它不是“随便文本替换”，而是围绕 AST 目标做完整函数/方法替换：先用 `structural_path` 定位目标，再用完整节点源码整体替换，最后重新扫描 AST 并拒绝引入解析错误节点的结果。单条模式和批量模式互斥：只能使用顶层 `file`/`structural_path`/`replacement`，或使用非空 `patches[]`，不能混传。批量模式下默认 `atomic=true`，任一 patch 未命中、歧义、stale、replacement 不是完整函数或同文件范围重叠，整批都会在写入前被拒绝。
 
 适合：
 
@@ -217,6 +224,8 @@
 
 - 不用于零散局部文本替换
 - `replacement` 必须是完整函数或方法源码
+- 它是函数/过程级整节点替换工作流，通常由 `node-source` 返回的源码驱动
+- `enum`、`enum variant/member`、结构字段、类型别名、语句级节点都不支持
 - 批量输入使用 `patches = [{ file, structural_path, replacement }, ...]`
 - 可传入 `precondition = { node_hash, file_hash, range }` 做 stale check
 - 成功结果会区分 `previous_node_hash` 与 `new_node_hash`，后续 stale check 应使用 `new_node_hash`

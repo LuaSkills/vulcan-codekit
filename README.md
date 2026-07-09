@@ -168,7 +168,7 @@ It is useful for:
 
 ### `vulcan-codekit-node-source`
 
-After `ast-detail` or `rg` has confirmed a target function or method, this reads the complete source of one or more nodes by `structural_path`, including cross-file batches.
+After `ast-detail` or `rg` has confirmed a target function or method, this reads the complete current source of one or more nodes by `structural_path`, including cross-file batches. In the normal workflow, this is the read step immediately before `vulcan-codekit-patch`.
 
 It returns:
 
@@ -187,6 +187,7 @@ Useful for:
 - Carefully reading the current implementation before patching
 - Reviewing one or more owner functions instead of a whole file
 - Avoiding a fallback to full-file reads just to get a function body
+- Carrying `node_hash` / `file_hash` into a later whole-function replacement
 
 Node reads consistently use `nodes[]`:
 
@@ -201,11 +202,17 @@ It returns partial success. A missing structural path, ambiguous structural path
 
 By default, it processes up to 20 nodes. Repeated hits to the same node are marked as `duplicate`, and requests beyond the limit are marked as `skipped`.
 
+Boundaries:
+
+- it only returns function or method nodes
+- non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are outside this workflow
+- it is the paired read step for whole-node replacement, not a generic structural extractor
+
 ### `vulcan-codekit-patch`
 
-Once the target is known at function level, this replaces one or more functions or methods structurally.
+Once the target is known at function level, this replaces one or more functions or methods structurally. In the normal workflow, `node-source` is called first so the replacement is built from the exact current node source.
 
-It is not "casual text replacement". It performs complete function or method replacement around AST targets: locate the target by `structural_path`, write the replacement, rescan the AST, and reject results that introduce parse-error nodes. Single mode and batch mode are mutually exclusive: use either top-level `file`/`structural_path`/`replacement` or non-empty `patches[]`, not both. In batch mode, `atomic=true` is the default. If any patch is missing, ambiguous, stale, not a complete function replacement, or overlaps another range in the same file, the entire batch is rejected before writing.
+It is not "casual text replacement". It performs complete function or method replacement around AST targets: locate the target by `structural_path`, replace the whole node with complete source text, rescan the AST, and reject results that introduce parse-error nodes. Single mode and batch mode are mutually exclusive: use either top-level `file`/`structural_path`/`replacement` or non-empty `patches[]`, not both. In batch mode, `atomic=true` is the default. If any patch is missing, ambiguous, stale, not a complete function replacement, or overlaps another range in the same file, the entire batch is rejected before writing.
 
 Useful for:
 
@@ -218,6 +225,8 @@ Its boundaries are also clear:
 
 - It is not for scattered local text replacements
 - `replacement` must be complete function or method source
+- it is a function/procedure-level whole-node replacement workflow, usually driven by `node-source` output
+- non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are not supported
 - Batch input uses `patches = [{ file, structural_path, replacement }, ...]`
 - You can pass `precondition = { node_hash, file_hash, range }` for stale checks
 - Successful results distinguish `previous_node_hash` from `new_node_hash`; later stale checks should use `new_node_hash`

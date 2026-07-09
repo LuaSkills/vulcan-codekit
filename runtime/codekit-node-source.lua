@@ -87,8 +87,11 @@ local function load_patch_runtime_helpers()
         load_ast_runtime_helpers = extract_upvalue_by_name(patch_entry, "load_ast_runtime_helpers"),
         validate_file_argument = extract_upvalue_by_name(patch_entry, "validate_file_argument"),
         validate_structural_path_argument = extract_upvalue_by_name(patch_entry, "validate_structural_path_argument"),
+        resolve_public_structural_path_argument = extract_upvalue_by_name(patch_entry, "resolve_public_structural_path_argument"),
         collect_ast_for_file = extract_upvalue_by_name(patch_entry, "collect_ast_for_file"),
         find_matching_patch_targets = extract_upvalue_by_name(patch_entry, "find_matching_patch_targets"),
+        find_matching_symbol_targets = extract_upvalue_by_name(patch_entry, "find_matching_symbol_targets"),
+        find_enum_member_parent_targets = extract_upvalue_by_name(patch_entry, "find_enum_member_parent_targets"),
         build_candidate_descriptor = extract_upvalue_by_name(patch_entry, "build_candidate_descriptor"),
     }
 
@@ -308,14 +311,21 @@ local function normalize_node_requests(args, helpers)
                 file_error.node_index = node_index
                 push_node_error_request(requests, node_index, node.file, node.structural_path, file_error)
             else
-                local structural_paths, structural_path_error = parse_structural_path_lines(node.structural_path)
-                if structural_path_error then
-                    structural_path_error.node_index = node_index
-                    structural_path_error.file = file_path
-                    push_node_error_request(requests, node_index, file_path, node.structural_path, structural_path_error)
+                local structural_path_value, structural_path_value_error = helpers.resolve_public_structural_path_argument(node)
+                if structural_path_value_error then
+                    structural_path_value_error.node_index = node_index
+                    structural_path_value_error.file = file_path
+                    push_node_error_request(requests, node_index, file_path, node.structural_path or "", structural_path_value_error)
                 else
-                    for _, structural_path in ipairs(structural_paths) do
-                        push_node_request(requests, node_index, file_path, structural_path)
+                    local structural_paths, structural_path_error = parse_structural_path_lines(structural_path_value)
+                    if structural_path_error then
+                        structural_path_error.node_index = node_index
+                        structural_path_error.file = file_path
+                        push_node_error_request(requests, node_index, file_path, structural_path_value, structural_path_error)
+                    else
+                        for _, structural_path in ipairs(structural_paths) do
+                            push_node_request(requests, node_index, file_path, structural_path)
+                        end
                     end
                 end
             end
@@ -513,15 +523,71 @@ return function(args)
             else
                 local matches = helpers.find_matching_patch_targets(ast_entry.symbol_roots, request.structural_path)
                 if #matches == 0 then
-                    summary.missing = summary.missing + 1
-                    table.insert(results, {
-                        status = "missing",
-                        request_index = request.request_index,
-                        node_index = request.node_index,
-                        file = request.file,
-                        structural_path = request.structural_path,
-                        message = "no function or method matched the structural_path",
-                    })
+                    local symbol_matches = helpers.find_matching_symbol_targets(ast_entry.symbol_roots, request.structural_path)
+                    if #symbol_matches > 0 then
+                        local candidates = {}
+                        for _, symbol in ipairs(symbol_matches) do
+                            table.insert(candidates, helpers.build_candidate_descriptor(symbol))
+                        end
+                        table.sort(candidates, function(left, right)
+                            if left.file ~= right.file then
+                                return left.file < right.file
+                            end
+                            if left.path ~= right.path then
+                                return left.path < right.path
+                            end
+                            return (left.start_line or 0) < (right.start_line or 0)
+                        end)
+                        summary.errors = summary.errors + 1
+                        table.insert(results, {
+                            status = "error",
+                            request_index = request.request_index,
+                            node_index = request.node_index,
+                            file = request.file,
+                            structural_path = request.structural_path,
+                            error = "structural_path_not_patchable",
+                            message = "the structural_path matched non-function symbols, but node-source only returns function/method nodes for the whole-function patch workflow",
+                            candidates = candidates,
+                        })
+                    else
+                        local enum_parent_matches = helpers.find_enum_member_parent_targets(ast_entry.symbol_roots, request.structural_path)
+                        if #enum_parent_matches > 0 then
+                            local candidates = {}
+                            for _, symbol in ipairs(enum_parent_matches) do
+                                table.insert(candidates, helpers.build_candidate_descriptor(symbol))
+                            end
+                            table.sort(candidates, function(left, right)
+                                if left.file ~= right.file then
+                                    return left.file < right.file
+                                end
+                                if left.path ~= right.path then
+                                    return left.path < right.path
+                                end
+                                return (left.start_line or 0) < (right.start_line or 0)
+                            end)
+                            summary.errors = summary.errors + 1
+                            table.insert(results, {
+                                status = "error",
+                                request_index = request.request_index,
+                                node_index = request.node_index,
+                                file = request.file,
+                                structural_path = request.structural_path,
+                                error = "structural_path_unsupported_granularity",
+                                message = "the structural_path appears to target a deeper enum variant/member, but node-source only indexes function/method nodes for the patch workflow",
+                                candidates = candidates,
+                            })
+                        else
+                            summary.missing = summary.missing + 1
+                            table.insert(results, {
+                                status = "missing",
+                                request_index = request.request_index,
+                                node_index = request.node_index,
+                                file = request.file,
+                                structural_path = request.structural_path,
+                                message = "no function or method matched the structural_path",
+                            })
+                        end
+                    end
                 elseif #matches > 1 then
                     local candidates = {}
                     for _, symbol in ipairs(matches) do

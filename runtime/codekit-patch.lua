@@ -209,6 +209,26 @@ local function validate_structural_path_argument(value)
 end
 
 --[[
+Resolve the canonical structural_path and reject the legacy selector field.
+解析规范 structural_path，并拒绝旧版 selector 字段。
+]]
+local function resolve_public_structural_path_argument(source)
+    local request = type(source) == "table" and source or {}
+    local structural_path_value = request.structural_path
+    local selector_value = request.selector
+
+    if selector_value ~= nil then
+        return nil, {
+            error = "legacy_selector_not_supported",
+            message = "selector is no longer supported; use structural_path instead",
+            actual_type = type(selector_value),
+        }
+    end
+
+    return validate_structural_path_argument(structural_path_value)
+end
+
+--[[
 Validate the replacement argument and require full function source text.
 校验 replacement 参数，并要求传入完整函数源码。
 ]]
@@ -363,6 +383,15 @@ local function collect_patchable_symbols(symbols, collected)
             table.insert(collected, symbol)
         end
         collect_patchable_symbols(symbol.children or {}, collected)
+    end
+end
+
+-- Collect every structural symbol from the tree for support diagnostics.
+-- 为支持性诊断收集结构树中的全部结构节点。
+local function collect_all_symbols(symbols, collected)
+    for _, symbol in ipairs(symbols or {}) do
+        table.insert(collected, symbol)
+        collect_all_symbols(symbol.children or {}, collected)
     end
 end
 
@@ -950,6 +979,55 @@ find_matching_patch_targets = function(symbol_roots, selector)
     return matches
 end
 
+-- Match any structural symbols by selector so non-function hits can be reported clearly.
+-- 按 selector 匹配任意结构节点，便于清晰报告非函数命中。
+local function find_matching_symbol_targets(symbol_roots, selector)
+    local all_symbols = {}
+    collect_all_symbols(symbol_roots or {}, all_symbols)
+
+    local selector_segments = split_selector_segments(selector)
+    local matches = {}
+    for _, symbol in ipairs(all_symbols) do
+        if symbol_matches_selector(symbol, selector_segments) then
+            table.insert(matches, symbol)
+        end
+    end
+    return matches
+end
+
+-- Detect whether the selector descends into a deeper member beneath an enum symbol.
+-- 检测 selector 是否继续深入到 enum 节点下的更细粒度成员。
+local function symbol_matches_selector_prefix(symbol, selector_segments)
+    local chain = build_symbol_chain(symbol)
+    if #selector_segments == 0 or #chain == 0 or #chain >= #selector_segments then
+        return false
+    end
+
+    for index, node in ipairs(chain) do
+        local aliases = build_symbol_segment_aliases(node)
+        if not aliases[selector_segments[index]] then
+            return false
+        end
+    end
+    return true
+end
+
+-- Find enum ancestors that suggest the selector targets an unsupported enum variant/member granularity.
+-- 查找提示 selector 正在命中不受支持 enum 变体或成员粒度的父 enum 节点。
+local function find_enum_member_parent_targets(symbol_roots, selector)
+    local all_symbols = {}
+    collect_all_symbols(symbol_roots or {}, all_symbols)
+
+    local selector_segments = split_selector_segments(selector)
+    local matches = {}
+    for _, symbol in ipairs(all_symbols) do
+        if symbol.kind == "enum" and symbol_matches_selector_prefix(symbol, selector_segments) then
+            table.insert(matches, symbol)
+        end
+    end
+    return matches
+end
+
 --[[
 将 patch 结果写回磁盘，按“完整函数替换”规则覆盖目标函数节点源码。
 Persist the patch result to disk by replacing the target function node with a full-function replacement.
@@ -1227,7 +1305,7 @@ end
 local function build_patch_request(index, raw_patch)
     local source = type(raw_patch) == "table" and raw_patch or {}
     local file_path, file_error = validate_file_argument(source.file)
-    local structural_path, structural_path_error = validate_structural_path_argument(source.structural_path)
+    local structural_path, structural_path_error = resolve_public_structural_path_argument(source)
     local replacement_text, replacement_error = validate_replacement_argument(source.replacement)
     local precondition, precondition_error = parse_patch_precondition(source.precondition)
 
@@ -1259,10 +1337,11 @@ end
 -- 为互斥模式冲突构造一个被拒绝的 patch 请求。
 local function build_mixed_mode_patch_request(index, raw_patch)
     local source = type(raw_patch) == "table" and raw_patch or {}
+    local structural_path, _ = resolve_public_structural_path_argument(source)
     return {
         patch_index = index,
         file = trim(source.file or ""),
-        structural_path = trim(source.structural_path or ""),
+        structural_path = structural_path or trim(source.structural_path or ""),
         replacement = nil,
         precondition = nil,
         initial_error = {
@@ -1398,6 +1477,38 @@ local function prepare_patch_request(patch_request, helper_bundle, file_context_
 
     local matches = find_matching_patch_targets(context.symbol_roots, patch_request.structural_path)
     if #matches == 0 then
+        local symbol_matches = find_matching_symbol_targets(context.symbol_roots, patch_request.structural_path)
+        if #symbol_matches > 0 then
+            local candidates = {}
+            for _, symbol in ipairs(symbol_matches) do
+                table.insert(candidates, build_candidate_descriptor(symbol))
+            end
+            sort_candidate_descriptors(candidates)
+            return nil, {
+                error = "structural_path_not_patchable",
+                message = "the structural_path matched non-function symbols, but vulcan-codekit-patch only supports whole function/method replacement after node-source",
+                file = patch_request.file,
+                structural_path = patch_request.structural_path,
+                candidates = candidates,
+            }
+        end
+
+        local enum_parent_matches = find_enum_member_parent_targets(context.symbol_roots, patch_request.structural_path)
+        if #enum_parent_matches > 0 then
+            local candidates = {}
+            for _, symbol in ipairs(enum_parent_matches) do
+                table.insert(candidates, build_candidate_descriptor(symbol))
+            end
+            sort_candidate_descriptors(candidates)
+            return nil, {
+                error = "structural_path_unsupported_granularity",
+                message = "the structural_path appears to target a deeper enum variant/member, but enum variants or members are not indexed as whole function/method patch targets",
+                file = patch_request.file,
+                structural_path = patch_request.structural_path,
+                candidates = candidates,
+            }
+        end
+
         return nil, {
             error = "structural_path_not_found",
             message = "no patchable function matched the structural_path",
@@ -2082,8 +2193,11 @@ return function(args)
         return {
             validate_file_argument = validate_file_argument,
             validate_structural_path_argument = validate_structural_path_argument,
+            resolve_public_structural_path_argument = resolve_public_structural_path_argument,
             collect_ast_for_file = collect_ast_for_file,
             find_matching_patch_targets = find_matching_patch_targets,
+            find_matching_symbol_targets = find_matching_symbol_targets,
+            find_enum_member_parent_targets = find_enum_member_parent_targets,
             build_candidate_descriptor = build_candidate_descriptor,
         }
     end

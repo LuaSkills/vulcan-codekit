@@ -1,19 +1,19 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "description": "Patch accepts either single mode with file, structural_path, and replacement, or batch mode with patches[]. These modes are mutually exclusive. The schema keeps both property sets visible for AI/tool compatibility while descriptions explain the mode rules.",
+  "description": "Patch performs whole-node replacement for function/method targets only. The typical workflow is: first use node-source to read the exact current function/method source, then submit a complete replacement source through patch, optionally with node_hash/file_hash/range stale checks. This tool does not support enum, enum variant/member, struct field, type alias, or statement-level patching.",
   "properties": {
     "file": {
       "type": "string",
-      "description": "Target file that contains the function or method to patch. Required only in single mode; omit it when patches[] is non-empty."
+      "description": "Target file that contains the function or method node to replace. Required only in single mode; omit it when patches[] is non-empty."
     },
     "structural_path": {
       "type": "string",
-      "description": "Slash-separated structural path suffix for a function or method. It is not a regex or glob. Examples include main, UserService/get_user, impl MyType/new, and impl MyTrait for MyType/run."
+      "description": "Slash-separated structural path suffix for a function/method target only. It is not a regex or glob. Examples include main, UserService/get_user, impl MyType/new, and impl MyTrait for MyType/run. Non-function symbols are rejected."
     },
     "replacement": {
       "type": "string",
-      "description": "Replacement source text. It must be the complete function or method source, starting from the declaration line."
+      "description": "Replacement source text for the whole target function/method node. It must start from the declaration line and include the complete function or method source, not a fragment."
     },
     "precondition": {
       "type": "object",
@@ -61,22 +61,22 @@
     },
     "patches": {
       "type": "array",
-      "description": "Optional batch input. Each item must include file, structural_path, and replacement. Do not combine a non-empty patches[] with top-level file, structural_path, replacement, or precondition.",
+      "description": "Optional batch input. Each item must include file, structural_path, and replacement for a whole function/method node. Do not combine a non-empty patches[] with top-level file, structural_path, replacement, or precondition.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "file": {
             "type": "string",
-            "description": "Target file that contains the function or method to patch."
+            "description": "Target file that contains the function or method node to replace."
           },
           "structural_path": {
             "type": "string",
-            "description": "Slash-separated structural path suffix for the target function or method."
+            "description": "Slash-separated structural path suffix for the target function/method node."
           },
           "replacement": {
             "type": "string",
-            "description": "Complete replacement function or method source."
+            "description": "Complete replacement source for the whole function/method node."
           },
           "precondition": {
             "type": "object",

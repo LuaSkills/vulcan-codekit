@@ -16,13 +16,13 @@ help:
       description: Markdown heading navigation workflow.
       file: help/markdown-menu.md
     - name: node-source
-      description: Function or method source extraction workflow by structural_path.
+      description: Function/method source extraction workflow that typically precedes whole-function patching by structural_path.
       file: help/node-source.md
     - name: tree
       description: Project structure mapping and candidate-file selection workflow.
       file: help/tree.md
     - name: patch
-      description: Safe whole-function replacement workflow.
+      description: Safe whole-function replacement workflow paired with node-source output.
       file: help/patch.md
 entries:
   - name: ast-detail
@@ -84,7 +84,7 @@ entries:
         description: "Disable ignore rules only when set to true. Leave it unset for the normal ignored-by-default documentation scan behavior."
         required: false
   - name: node-source
-    description: "[NODE SOURCE] Extract the full source text for one or more function or method nodes selected by structural_path. Uses a required nodes[] payload where each node item carries its own file and structural_path, including same-file and cross-file batches."
+    description: "[NODE SOURCE] Extract the full current source of one or more function/method nodes selected by structural_path. This is typically the read step before vulcan-codekit-patch so the caller can inspect the exact node source, prepare a whole-node replacement, and reuse node_hash/file_hash for stale checks. Only function/method nodes are supported today."
     lua_entry: runtime/codekit-node-source.lua
     lua_module: codekit_node_source
     help: node-source
@@ -108,7 +108,7 @@ entries:
         description: "Disable ignore rules only when set to true. Leave it unset for the normal ignored-by-default tree scan behavior."
         required: false
   - name: patch
-    description: "[FUNCTION AST PATCH] Replace one or more functions or methods by structural_path. Supports either single mode (file+structural_path+replacement) or batch mode (patches[]); these modes are mutually exclusive. Batch mode defaults to atomic=true, so any validation failure rejects the whole batch before writing."
+    description: "[WHOLE FUNCTION PATCH] Replace one or more whole function/method nodes by structural_path. This is a function/procedure-level whole-node replacement workflow, typically used after vulcan-codekit-node-source has returned the current node source. The replacement must be the complete function/method source, not a fragment. Non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are not supported."
     lua_entry: runtime/codekit-patch.lua
     lua_module: codekit_patch
     help: patch
