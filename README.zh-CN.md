@@ -179,15 +179,14 @@
 - 行号范围
 - 完整节点源码
 - 每个节点的 `ok` / `missing` / `ambiguous` / `duplicate` / `skipped` / `error` 状态
-- `node_hash` 与 `file_hash`
-- `overflow_mode: truncate`
+- 当前源码位置和完整源码是主要结果；正常成功文本不再展示运行时 Hash 和溢出元数据
 
 适合：
 
 - patch 前精读当前实现
 - review 一个或多个 owner 函数而不是整文件
 - 避免为了拿函数正文退回全文读取
-- 为后续整函数替换携带 `node_hash` / `file_hash`
+- 基于当前实现准备完整 replacement
 
 节点读取统一使用 `nodes[]`：
 
@@ -227,9 +226,10 @@
 - 它是函数/过程级整节点替换工作流，通常由 `node-source` 返回的源码驱动
 - `enum`、`enum variant/member`、结构字段、类型别名、语句级节点都不支持
 - 批量输入使用 `patches = [{ file, structural_path, replacement }, ...]`
-- 可传入 `precondition = { node_hash, file_hash, range }` 做 stale check
-- 成功结果会区分 `previous_node_hash` 与 `new_node_hash`，后续 stale check 应使用 `new_node_hash`
-- stale 拒绝会返回对应的 expected/actual 诊断字段，便于调用方判断当前源码状态
+- 可选传入高级 `precondition = { node_hash, file_hash, range }` 做 stale check
+- 成功结果直接包含真实写入后的目标代码行，以及目标前后最多各五行上下文
+- 正常成功文本不再展示内部源码 Hash 和运行时请求索引
+- stale 拒绝会说明源码发生变化以及下一步动作；结构化宿主诊断仍可保留 expected/actual 验证值
 - structural_path 如果命中多个候选，会返回候选而不是盲目修改
 
 ## 一套更适合 Agent 的代码工作流

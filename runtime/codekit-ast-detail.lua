@@ -55,7 +55,6 @@ local MAX_INLINE_RESULT_BYTES = 10000
 local MAX_HEADER_LINES = 4
 local MAX_COMMENT_SUMMARY_BYTES = 100
 local CURRENT_WORKING_DIRECTORY = nil
-local LFS_MODULE = nil
 local SHARED_LENGTH_HELPERS = nil
 local load_shared_length_helpers
 local AST_GREP_FFI_CLIENT = nil
@@ -110,24 +109,6 @@ end
 
 local function starts_with(text, prefix)
     return tostring(text or ""):sub(1, #prefix) == prefix
-end
-
---[[
-解析当前运行时可用的宿主进程执行函数，仅接受正式节点 `vulcan.process.exec`。
-Resolve the host-side process execution function and accept only the formal node `vulcan.process.exec`.
-
-返回 / Returns:
-- function|nil: 可调用的宿主执行函数；若宿主未注入则返回 nil。
-  Callable host execution function, or nil when the host did not inject one.
-]]
-local function get_host_exec_function()
-    if type(vulcan) ~= "table" then
-        return nil
-    end
-    if type(vulcan.process) == "table" and type(vulcan.process.exec) == "function" then
-        return vulcan.process.exec
-    end
-    return nil
 end
 
 --[[
@@ -1343,209 +1324,6 @@ local function classify_target_path_modes(target_paths)
     return "file", nil
 end
 
---[[
-校验 Markdown 导出路径，要求为绝对路径，并建议使用 `.md` 扩展名。
-Validate the Markdown export path; it must be absolute and should use the `.md` extension.
-]]
-local function validate_export_md_argument(value)
-    if value == nil then
-        return nil, nil
-    end
-    if type(value) ~= "string" or trim(value) == "" then
-        return nil, {
-            error = "invalid_export_md_argument",
-            message = "export_md_path must be a non-empty absolute file path when provided",
-            actual_type = type(value),
-        }
-    end
-
-    local normalized = trim(value)
-    if not is_absolute_path(normalized) then
-        return nil, {
-            error = "invalid_export_md_argument",
-            message = "export_md_path must be an absolute file path",
-            export_md_path = normalized,
-        }
-    end
-    if not normalized:lower():match("%.md$") then
-        return nil, {
-            error = "invalid_export_md_argument",
-            message = "export_md_path must end with .md",
-            export_md_path = normalized,
-        }
-    end
-    return normalized, nil
-end
-
---[[
-懒加载 LuaFileSystem，用于在导出 JSON/Markdown 前递归创建目录。
-Lazily load LuaFileSystem so directories can be created recursively before exporting JSON or Markdown.
-]]
-local function get_lfs_module()
-    if LFS_MODULE ~= nil then
-        return LFS_MODULE
-    end
-    local ok, module = pcall(require, "lfs")
-    if ok then
-        LFS_MODULE = module
-    else
-        LFS_MODULE = false
-    end
-    return LFS_MODULE
-end
-
---[[
-获取某个路径的父目录，缺失时返回 nil。
-Get the parent directory of a path and return nil when no parent exists.
-]]
-local function get_parent_directory(path)
-    local normalized = tostring(path or ""):gsub("[\\/]+$", "")
-    local parent = normalized:match("^(.*)[\\/][^\\/]+$")
-    if not parent or parent == normalized then
-        return nil
-    end
-    return parent
-end
-
-local function append_path_segment(current, segment)
-    if current == "" then
-        return segment
-    end
-    if current == "/" then
-        return "/" .. segment
-    end
-    if current:sub(-1) == "/" then
-        return current .. segment
-    end
-    return current .. "/" .. segment
-end
-
---[[
-在 LuaFileSystem 不可用时，回退到宿主 `vulcan.process.exec` 递归创建目录，避免大结果落盘依赖单一 Lua C 模块。
-Fall back to host-side `vulcan.process.exec` recursive directory creation when LuaFileSystem is unavailable, so large-result spilling does not depend on a single Lua C module.
-
-参数 / Parameters:
-- directory_path(string): 需要创建的目录绝对路径 / Absolute directory path that should be created.
-
-返回 / Returns:
-- boolean: 创建成功或目录已存在时返回 true / Returns true when creation succeeds or the directory already exists.
-- table|nil: 创建失败时返回结构化错误对象 / Structured error object when creation fails.
-]]
-local function ensure_directory_via_exec(directory_path)
-    local host_exec = get_host_exec_function()
-    if type(host_exec) ~= "function" then
-        return false, {
-            error = "directory_creation_failed",
-            message = "neither LuaFileSystem nor host process exec is available for directory creation",
-            path = directory_path,
-        }
-    end
-
-    local os_info = vulcan.os.info()
-    local request
-    if os_info and os_info.os == "windows" then
-        request = {
-            program = "powershell.exe",
-            args = {
-                "-NoProfile",
-                "-Command",
-                string.format("New-Item -ItemType Directory -Force -Path '%s' | Out-Null", tostring(directory_path):gsub("'", "''")),
-            },
-            timeout_ms = 10000,
-        }
-    else
-        request = {
-            program = "mkdir",
-            args = { "-p", directory_path },
-            timeout_ms = 10000,
-        }
-    end
-
-    local ok, result = pcall(host_exec, request)
-    if not ok or type(result) ~= "table" then
-        return false, {
-            error = "directory_creation_failed",
-            message = ok and "unexpected exec result" or tostring(result),
-            path = directory_path,
-        }
-    end
-    if result.error or result.timed_out or result.success == false then
-        return false, {
-            error = "directory_creation_failed",
-            message = trim(result.error or result.stderr or "mkdir failed"),
-            path = directory_path,
-        }
-    end
-    if vulcan.fs.exists(directory_path) and vulcan.fs.is_dir(directory_path) then
-        return true, nil
-    end
-    return false, {
-        error = "directory_creation_failed",
-        message = "directory was not created",
-        path = directory_path,
-    }
-end
-
---[[
-递归创建目录，供工作目录缓存和 Markdown 导出复用。
-Create directories recursively so workdir-based cache dumps and Markdown exports can share the same helper.
-]]
-local function ensure_directory(directory_path)
-    local normalized = trim(directory_path or "")
-    if normalized == "" then
-        return false, {
-            error = "directory_creation_failed",
-            message = "directory path is empty",
-        }
-    end
-    if vulcan.fs.exists(normalized) then
-        if vulcan.fs.is_dir(normalized) then
-            return true, nil
-        end
-        return false, {
-            error = "directory_creation_failed",
-            message = "target path already exists as a file",
-            path = normalized,
-        }
-    end
-
-    local lfs = get_lfs_module()
-    if not lfs then
-        return ensure_directory_via_exec(normalized)
-    end
-
-    local path_text = tostring(normalized):gsub("\\", "/")
-    local prefix = ""
-    if path_text:match("^%a:/") then
-        prefix = path_text:sub(1, 3)
-        path_text = path_text:sub(4)
-    elseif starts_with(path_text, "/") then
-        prefix = "/"
-        path_text = path_text:sub(2)
-    end
-
-    local current = prefix
-    for segment in path_text:gmatch("[^/]+") do
-        current = append_path_segment(current, segment)
-        if not vulcan.fs.exists(current) then
-            local ok, mkdir_error = lfs.mkdir(current)
-            if not ok then
-                return false, {
-                    error = "directory_creation_failed",
-                    message = tostring(mkdir_error or "mkdir failed"),
-                    path = current,
-                }
-            end
-        elseif not vulcan.fs.is_dir(current) then
-            return false, {
-                error = "directory_creation_failed",
-                message = "path exists but is not a directory",
-                path = current,
-            }
-        end
-    end
-    return true, nil
-end
 
 --[[
 确保输出文件的父目录存在，并把文本内容写入目标文件。
@@ -1580,16 +1358,10 @@ end
 把 `codekit-ast-detail` 的扫描结果渲染为 Markdown 纯文本，便于 AI 直接阅读并继续选择下一步文件操作。
 Render the `codekit-ast-detail` scan result as plain Markdown text so the AI can read it directly and choose the next file-level action.
 ]]
+
 local function build_ast_detail_text(result)
     local lines = {
-        "# AST DETAIL SUMMARY",
-        string.format(
-            "- files_scanned: %d | files_with_symbols: %d | items_found: %d | errors: %d",
-            result.files_scanned or 0,
-            result.files_with_symbols or 0,
-            result.items_found or 0,
-            #(result.errors or {})
-        ),
+        "# AST DETAIL",
     }
 
     local error_lines = render_error_lines(result.errors)
@@ -1606,15 +1378,7 @@ local function build_ast_detail_text(result)
         if index > 1 or #error_lines > 0 then
             table.insert(lines, "")
         end
-        table.insert(
-            lines,
-            string.format(
-                "[%s Lines:%d Symbols:%d]",
-                tostring(file_result.file or "unknown"),
-                tonumber(file_result.lines) or 0,
-                tonumber(file_result.symbol_count) or 0
-            )
-        )
+        table.insert(lines, string.format("[%s]", tostring(file_result.file or "unknown")))
         if trim(file_result.content or "") == "" then
             table.insert(lines, "> No AST symbols found in this file.")
         else
@@ -1629,7 +1393,7 @@ end
 完成 AST detail 正文输出；超限策略不再由 Lua 决定，而是交给 MCP 宿主统一处理。
 Finalize the AST detail body; overflow strategy is no longer decided by Lua and is delegated to the MCP host.
 ]]
-local function finalize_ast_detail_content(markdown_text, summary_lines)
+local function finalize_ast_detail_content(markdown_text)
     return tostring(markdown_text or ""), vulcan.runtime.overflow_type.page
 end
 
@@ -2644,46 +2408,21 @@ return function(args)
     end
 
     local file_results = {}
-    local total_items = 0
-    local files_with_symbols = 0
     for _, file_info in ipairs(files) do
         local symbols = deduplicate_symbols(normalized_by_file[file_info.path] or {})
         local tree = (#symbols > 0) and build_symbol_tree(symbols) or {}
         table.insert(file_results, {
             file = file_info.display_file or file_info.path,
-            lines = get_file_line_count(file_info.path),
-            symbol_count = #symbols,
             content = build_file_content(tree, include_comments),
         })
-        if #symbols > 0 then
-            files_with_symbols = files_with_symbols + 1
-            total_items = total_items + #symbols
-        end
     end
 
     table.sort(file_results, function(left, right)
         return left.file < right.file
     end)
 
-    local meta = {
-        files_scanned = #files,
-        files_with_symbols = files_with_symbols,
-        items_found = total_items,
+    return finalize_ast_detail_content(build_ast_detail_text({
+        files = file_results,
         errors = errors,
-    }
-
-    return finalize_ast_detail_content(
-        build_ast_detail_text({
-            files_scanned = meta.files_scanned,
-            files_with_symbols = meta.files_with_symbols,
-            items_found = meta.items_found,
-            files = file_results,
-            errors = meta.errors,
-        }),
-        {
-            string.format("files_scanned: %d", meta.files_scanned or 0),
-            string.format("files_with_symbols: %d", meta.files_with_symbols or 0),
-            string.format("items_found: %d", meta.items_found or 0),
-        }
-    )
+    }))
 end

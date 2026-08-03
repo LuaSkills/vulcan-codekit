@@ -288,7 +288,6 @@ local function load_ast_runtime_helpers()
         normalize_symbol = extract_upvalue_by_name(ast_entry, "normalize_symbol"),
         deduplicate_symbols = extract_upvalue_by_name(ast_entry, "deduplicate_symbols"),
         build_symbol_tree = extract_upvalue_by_name(ast_entry, "build_symbol_tree"),
-        get_file_line_count = extract_upvalue_by_name(ast_entry, "get_file_line_count"),
     }
 
     for helper_name, helper_value in pairs(helpers) do
@@ -746,12 +745,10 @@ Parse `rg --json` output, keeping only `match` events and grouping line hits by 
 
 返回 / Returns:
 - table: 按文件聚合的命中结果 / Hits grouped by file.
-- number: 总命中行数量 / Total matched-line count.
 - table: 诊断信息数组 / Diagnostic message array.
 ]]
 local function parse_rg_json_output(output, stderr_text)
     local hits_by_file = {}
-    local total_matches = 0
     local diagnostics = {}
 
     for line_index, raw_line in ipairs(split_lines(output or "")) do
@@ -786,12 +783,6 @@ local function parse_rg_json_output(output, stderr_text)
                             text = line_text,
                             submatches = (data.submatches or {}),
                         })
-                        total_matches = total_matches + 1
-                    end
-                elseif decoded.type == "summary" then
-                    local stats = ((decoded.data or {}).stats) or {}
-                    if tonumber(stats.matches) and tonumber(stats.matches) > total_matches then
-                        total_matches = tonumber(stats.matches)
                     end
                 end
             end
@@ -805,7 +796,7 @@ local function parse_rg_json_output(output, stderr_text)
         end
     end
 
-    return hits_by_file, total_matches, diagnostics
+    return hits_by_file, diagnostics
 end
 
 -- AST 命中归属分析 / Map ripgrep hit lines back to the most relevant AST structures.
@@ -1089,7 +1080,6 @@ Build rg file results from pre-collected file contexts and always emit only matc
 ]]
 local function build_rg_file_results(render_contexts, helper_bundle)
     local file_results = {}
-    local total_items = 0
 
     for _, render_context in ipairs(render_contexts or {}) do
         if #render_context.symbols > 0 and #render_context.file_hits > 0 then
@@ -1100,10 +1090,8 @@ local function build_rg_file_results(render_contexts, helper_bundle)
                 if trim(content) ~= "" then
                     table.insert(file_results, {
                         file = render_context.file_info.display_file or render_context.file_info.path,
-                        lines = helper_bundle.get_file_line_count(render_context.file_info.path),
                         content = content,
                     })
-                    total_items = total_items + 1
                 end
             end
         end
@@ -1113,7 +1101,7 @@ local function build_rg_file_results(render_contexts, helper_bundle)
         return left.file < right.file
     end)
 
-    return file_results, total_items
+    return file_results
 end
 
 local function render_error_lines(errors)
@@ -1137,17 +1125,10 @@ end
 把 `codekit-rg` 结果渲染为 Markdown 纯文本，便于模型直接阅读并继续下一步分析。
 Render the `codekit-rg` result as plain Markdown text so the model can read it directly and continue analysis.
 ]]
+
 local function build_rg_markdown(result)
     local lines = {
-        "# RG SUMMARY",
-        string.format(
-            "- files_scanned: %d | files_with_matches: %d | items_found: %d | rg_matches: %d | errors: %d",
-            result.files_scanned or 0,
-            result.files_with_matches or 0,
-            result.items_found or 0,
-            result.rg_matches or 0,
-            #(result.errors or {})
-        ),
+        "# RG RESULTS",
     }
 
     local error_lines = render_error_lines(result.errors)
@@ -1164,10 +1145,7 @@ local function build_rg_markdown(result)
         if index > 1 or #error_lines > 0 then
             table.insert(lines, "")
         end
-        table.insert(
-            lines,
-            string.format("[%s Lines:%d]", tostring(file_result.file or "unknown"), tonumber(file_result.lines) or 0)
-        )
+        table.insert(lines, string.format("[%s]", tostring(file_result.file or "unknown")))
         if trim(file_result.content or "") ~= "" then
             table.insert(lines, tostring(file_result.content))
         end
@@ -1180,8 +1158,8 @@ end
 统一收尾 rg 结果；正常情况下直接返回 Markdown，超出预算时走共享 overflow 协议。
 Finalize the rg result uniformly; return inline Markdown when safe, otherwise use the shared overflow protocol.
 
-参数 / Parameters:
-- full_result(table): 已完成统计与渲染内容拼装的最终结果对象 / Final result object with stats and rendered content assembled.
+ 参数 / Parameters:
+ - full_result(table): 已完成文件结果与诊断拼装的最终结果对象 / Final result object with rendered files and diagnostics assembled.
 
 返回 / Returns:
 - string: 完整 Markdown 正文，后续是否原样返回、截断还是分页由宿主统一决定。
@@ -1281,7 +1259,7 @@ return function(args)
         return render_codekit_error_markdown("CodeKit RG Error", rg_error)
     end
 
-    local hits_by_file, total_rg_matches, diagnostics = parse_rg_json_output(rg_stdout, rg_stderr)
+    local hits_by_file, diagnostics = parse_rg_json_output(rg_stdout, rg_stderr)
     local matched_file_paths = {}
     local hits_by_canonical_file = {}
     for file_path in pairs(hits_by_file) do
@@ -1296,13 +1274,8 @@ return function(args)
 
     if #matched_file_paths == 0 then
         return finalize_rg_result({
-            files_scanned = 0,
-            files_with_matches = 0,
-            items_found = 0,
-            rg_matches = 0,
             files = {},
             errors = diagnostics,
-            truncated = false,
         })
     end
 
@@ -1353,23 +1326,10 @@ return function(args)
         })
     end
 
-    local file_results, total_items = build_rg_file_results(render_contexts, helper_bundle)
-
-    local meta = {
-        files_scanned = #files,
-        files_with_matches = #file_results,
-        items_found = total_items,
-        rg_matches = total_rg_matches,
-        errors = aggregated_errors,
-    }
+    local file_results = build_rg_file_results(render_contexts, helper_bundle)
 
     return finalize_rg_result({
-        files_scanned = meta.files_scanned,
-        files_with_matches = meta.files_with_matches,
-        items_found = meta.items_found,
-        rg_matches = meta.rg_matches,
         files = file_results,
-        errors = meta.errors,
-        truncated = false,
+        errors = aggregated_errors,
     })
 end
