@@ -624,6 +624,56 @@ local function build_rg_command(rg_binary_path, arguments)
 end
 
 --[[
+将路径归一化为稳定的命中表键，消除 Windows 分隔符与大小写差异。
+Normalize a path into a stable hit-table key, removing Windows separator and case differences.
+
+参数 / Parameters:
+- path(string): `rg`、文件收集器或 AST 扫描器返回的路径 / Path returned by rg, the file collector, or the AST scanner.
+
+返回 / Returns:
+- string: 可安全用于命中表关联的规范路径键 / Canonical path key safe for hit-table correlation.
+]]
+local function normalize_path_key(path)
+    local normalized = tostring(path or ""):gsub("\\", "/"):gsub("/+", "/")
+    if vulcan.os.info().os == "windows" then
+        normalized = normalized:lower()
+    end
+    return normalized
+end
+
+--[[
+把 `rg` 返回的相对路径解析到 LuaSkills 当前工作目录，确保它能与 AST 的绝对文件路径关联。
+Resolve an rg-relative path against the LuaSkills working directory so it correlates with absolute AST file paths.
+
+参数 / Parameters:
+- path(string): `rg --json` 返回的文件路径 / File path returned by rg --json.
+
+返回 / Returns:
+- string: 原本就是绝对路径时保持不变，否则返回基于运行时工作目录的绝对路径 / Original absolute path or an absolute path based on the runtime working directory.
+]]
+local function resolve_rg_hit_path(path)
+    local normalized = tostring(path or "")
+    if normalized == ""
+        or normalized:match("^%a:[/\\]") ~= nil
+        or starts_with(normalized, "\\\\")
+        or starts_with(normalized, "/")
+    then
+        return normalized
+    end
+
+    local runtime_cwd = vulcan and vulcan.runtime and vulcan.runtime.cwd
+    if type(runtime_cwd) ~= "function" then
+        return normalized
+    end
+    local ok, current_directory = pcall(runtime_cwd)
+    current_directory = ok and trim(current_directory) or ""
+    if current_directory == "" then
+        return normalized
+    end
+    return vulcan.path.join(current_directory, normalized)
+end
+
+--[[
 调用 ripgrep，并优先使用宿主暴露的 `vulcan.process.exec`，缺失时回退到 `io.popen`。
 Execute ripgrep, preferring the host-provided `vulcan.process.exec` and falling back to `io.popen` when unavailable.
 
@@ -1233,8 +1283,14 @@ return function(args)
 
     local hits_by_file, total_rg_matches, diagnostics = parse_rg_json_output(rg_stdout, rg_stderr)
     local matched_file_paths = {}
+    local hits_by_canonical_file = {}
     for file_path in pairs(hits_by_file) do
         table.insert(matched_file_paths, file_path)
+        local canonical_key = normalize_path_key(resolve_rg_hit_path(file_path))
+        hits_by_canonical_file[canonical_key] = hits_by_canonical_file[canonical_key] or {}
+        for _, hit in ipairs(hits_by_file[file_path] or {}) do
+            table.insert(hits_by_canonical_file[canonical_key], hit)
+        end
     end
     table.sort(matched_file_paths)
 
@@ -1288,7 +1344,7 @@ return function(args)
 
     local render_contexts = {}
     for _, file_info in ipairs(files or {}) do
-        local file_hits = hits_by_file[file_info.path] or {}
+        local file_hits = hits_by_canonical_file[normalize_path_key(file_info.path)] or {}
         local symbols = helper_bundle.deduplicate_symbols(normalized_by_file[file_info.path] or {})
         table.insert(render_contexts, {
             file_info = file_info,
