@@ -149,6 +149,32 @@ def verify_cleanup(root: Path) -> None:
     require("IGNORE_RULE_CACHE" not in runtime_text, "persistent IGNORE_RULE_CACHE marker returned to runtime")
 
 
+def verify_ast_tree_helper_export(root: Path) -> None:
+    """
+    Verify that AST Tree consumes the explicit helper-export boundary.
+    验证 AST Tree 使用显式辅助函数导出边界。
+    """
+
+    ast_detail = read_text(root, "runtime/codekit-ast-detail.lua")
+    ast_tree = read_text(root, "runtime/codekit-ast-tree.lua")
+    require(
+        "local function expose_ast_tree_runtime_helpers" in ast_detail,
+        "ast-detail must define the explicit AST Tree helper exporter",
+    )
+    require(
+        "get_file_line_count = get_file_line_count" in ast_detail,
+        "ast-detail helper exporter must include the file line counter",
+    )
+    require(
+        'extract_upvalue_by_name(ast_entry, "expose_ast_tree_runtime_helpers")' in ast_tree,
+        "ast-tree must load the explicit helper exporter",
+    )
+    require(
+        "helpers.get_file_line_count(file_path)" in ast_tree,
+        "ast-tree must consume the exported file line counter",
+    )
+
+
 def main() -> int:
     """
     Run every output-contract check and return a process status.
@@ -161,6 +187,7 @@ def main() -> int:
         verify_patch_output(root)
         verify_compact_read_outputs(root)
         verify_cleanup(root)
+        verify_ast_tree_helper_export(root)
     except Exception as error:  # noqa: BLE001
         print(f"Output contract verification failed: {error}")
         return 1
