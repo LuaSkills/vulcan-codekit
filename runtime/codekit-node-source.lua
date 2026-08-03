@@ -468,8 +468,6 @@ return function(args)
         errors = 0,
         max_nodes = max_nodes,
     }
-    local ast_cache_by_file = {}
-    local file_cache_by_file = {}
     local seen_nodes = {}
 
     for _, request in ipairs(requests) do
@@ -499,15 +497,11 @@ return function(args)
                 goto continue
             end
 
-            local ast_entry = ast_cache_by_file[request.file]
-            if not ast_entry then
-                local symbol_roots, _, ast_error = helpers.collect_ast_for_file(request.file, ast_helpers)
-                ast_entry = {
-                    symbol_roots = symbol_roots,
-                    error = ast_error,
-                }
-                ast_cache_by_file[request.file] = ast_entry
-            end
+            local symbol_roots, _, ast_error = helpers.collect_ast_for_file(request.file, ast_helpers)
+            local ast_entry = {
+                symbol_roots = symbol_roots,
+                error = ast_error,
+            }
 
             if ast_entry.error then
                 summary.errors = summary.errors + 1
@@ -630,24 +624,19 @@ return function(args)
                             message = "structural_path resolved to a node that was already returned",
                         })
                     else
-                        local file_content = file_cache_by_file[request.file]
-                        if not file_content then
-                            local read_content, read_error = read_file_content(request.file)
-                            if read_error then
-                                summary.errors = summary.errors + 1
-                                table.insert(results, {
-                                    status = "error",
-                                    request_index = request.request_index,
-                                    node_index = request.node_index,
-                                    file = request.file,
-                                    structural_path = request.structural_path,
-                                    error = tostring(read_error.error or "file_read_failed"),
-                                    message = tostring(read_error.message or read_error.error or "failed to read file"),
-                                })
-                                goto continue
-                            end
-                            file_content = read_content
-                            file_cache_by_file[request.file] = file_content
+                        local file_content, read_error = read_file_content(request.file)
+                        if read_error then
+                            summary.errors = summary.errors + 1
+                            table.insert(results, {
+                                status = "error",
+                                request_index = request.request_index,
+                                node_index = request.node_index,
+                                file = request.file,
+                                structural_path = request.structural_path,
+                                error = tostring(read_error.error or "file_read_failed"),
+                                message = tostring(read_error.message or read_error.error or "failed to read file"),
+                            })
+                            goto continue
                         end
 
                         local source_text, source_error = extract_symbol_source(file_content, matches[1])

@@ -43,9 +43,7 @@ local DEFAULT_IGNORES = {
     [".idea"] = true, [".vscode"] = true, ["output"] = true,
 }
 
--- 运行时缓存与索引 / Runtime caches and lookup maps.
-local FILE_CACHE = {}
-local IGNORE_RULE_CACHE = {}
+-- 运行时索引 / Runtime lookup maps.
 local LANGUAGE_ALIAS_MAP = {}
 local EXTENSION_MAP = {}
 local DEFAULT_EXTENSION_FILTER = {}
@@ -374,8 +372,8 @@ local function parse_ignore_rule(line, base_directory)
 end
 
 --[[
-读取某个目录下的 `.gitignore` 与 `.ignore`，并缓存解析结果，避免递归遍历时重复读取同一路径。
-Read and cache `.gitignore` and `.ignore` files for a directory so recursive traversal does not repeatedly re-read the same path.
+读取某个目录下的 `.gitignore` 与 `.ignore`，每次调用都重新解析当前内容。
+Read `.gitignore` and `.ignore` files for a directory from their current contents on every call.
 
 参数 / Parameters:
 - directory_path(string): 当前遍历目录 / Directory currently being traversed.
@@ -384,11 +382,6 @@ Read and cache `.gitignore` and `.ignore` files for a directory so recursive tra
 - table: 当前目录新增的忽略规则数组 / Ignore rules newly introduced by the current directory.
 ]]
 local function load_directory_ignore_rules(directory_path)
-    local cache_key = normalize_ignore_path(directory_path)
-    if IGNORE_RULE_CACHE[cache_key] then
-        return IGNORE_RULE_CACHE[cache_key]
-    end
-
     local collected = {}
     for _, ignore_file_name in ipairs({ ".gitignore", ".ignore" }) do
         local ignore_file_path = vulcan.path.join(directory_path, ignore_file_name)
@@ -405,7 +398,6 @@ local function load_directory_ignore_rules(directory_path)
         end
     end
 
-    IGNORE_RULE_CACHE[cache_key] = collected
     return collected
 end
 
@@ -1677,12 +1669,8 @@ local function render_codekit_error_markdown(tool_title, error_payload)
     }, "\n")
 end
 
--- 文件读取与 capture 提取 / Cache file content and decode ast-grep captures.
+-- 文件读取与 capture 提取 / Read current file content and decode ast-grep captures.
 local function read_file_state(file_path)
-    if FILE_CACHE[file_path] then
-        return FILE_CACHE[file_path]
-    end
-
     local ok, content = pcall(vulcan.fs.read, file_path)
     if not ok then
         return nil, tostring(content)
@@ -1693,13 +1681,12 @@ local function read_file_state(file_path)
         lines = split_lines(content or ""),
     }
     state.line_count = #state.lines
-    FILE_CACHE[file_path] = state
     return state
 end
 
 --[[
-读取单个文件的总行数，优先复用文件状态缓存；若读取失败，则返回 0，避免影响整体结构输出。
-Read the total line count for a single file, reusing the file-state cache whenever possible; return 0 on read failure so the overall structure output stays stable.
+读取单个文件的当前总行数；若读取失败，则返回 0，避免影响整体结构输出。
+Read the current total line count for a single file; return 0 on read failure so the overall structure output stays stable.
 
 参数 / Parameters:
 - file_path(string): 目标文件完整路径 / Full path of the target file.

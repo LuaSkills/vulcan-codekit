@@ -1712,13 +1712,9 @@ local function sort_candidate_descriptors(candidates)
     end)
 end
 
--- Load and cache file content and AST context for one file.
--- 加载并缓存单个文件的文本与 AST 上下文。
-local function get_batch_file_context(file_path, helper_bundle, cache)
-    if cache[file_path] then
-        return cache[file_path]
-    end
-
+-- Load current file content and AST context for one file.
+-- 加载单个文件的当前文本与 AST 上下文。
+local function get_batch_file_context(file_path, helper_bundle)
     local file_content, file_error = read_file_content(file_path)
     local symbol_roots, file_info, ast_error = nil, nil, nil
     if not file_error then
@@ -1732,18 +1728,17 @@ local function get_batch_file_context(file_path, helper_bundle, cache)
         symbol_roots = symbol_roots,
         error = file_error or ast_error,
     }
-    cache[file_path] = context
     return context
 end
 
 -- Prepare one patch request by resolving its structural path and validating its replacement.
 -- 通过解析 structural_path 与校验 replacement 准备一个 patch 请求。
-local function prepare_patch_request(patch_request, helper_bundle, file_context_cache)
+local function prepare_patch_request(patch_request, helper_bundle)
     if patch_request.initial_error then
         return nil, patch_request.initial_error
     end
 
-    local context = get_batch_file_context(patch_request.file, helper_bundle, file_context_cache)
+    local context = get_batch_file_context(patch_request.file, helper_bundle)
     if context.error then
         return nil, context.error
     end
@@ -2290,7 +2285,6 @@ local function execute_patch_batch(args, helper_bundle)
     local patch_requests = normalize_patch_requests(args)
     local results_by_index = {}
     local plans = {}
-    local file_context_cache = {}
 
     for _, patch_request in ipairs(patch_requests) do
         if patch_request.patch_index > max_patches then
@@ -2302,7 +2296,7 @@ local function execute_patch_batch(args, helper_bundle)
                 message = "patch request skipped because max_patches was reached",
             }
         else
-            local plan, prepare_error = prepare_patch_request(patch_request, helper_bundle, file_context_cache)
+            local plan, prepare_error = prepare_patch_request(patch_request, helper_bundle)
             if prepare_error then
                 results_by_index[patch_request.patch_index] = build_rejected_result(patch_request, prepare_error)
             else
