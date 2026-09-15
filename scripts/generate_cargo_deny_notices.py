@@ -100,8 +100,8 @@ def load_cargo_deny_license_payload(ffi_dir: Path) -> dict[str, Any]:
 
     Parameters:
     参数:
-    - ffi_dir: ast-grep FFI crate directory.
-      ast-grep FFI crate 所在目录。
+    - ffi_dir: Unified CodeKit FFI crate directory.
+      统一 CodeKit FFI crate 所在目录。
 
     Returns:
     返回:
@@ -112,9 +112,10 @@ def load_cargo_deny_license_payload(ffi_dir: Path) -> dict[str, Any]:
         [
             "cargo",
             "deny",
-            "list",
-            "-c",
+            "--config",
             "deny.toml",
+            "--exclude-dev",
+            "list",
             "--format",
             "json",
             "--layout",
@@ -135,8 +136,8 @@ def load_cargo_metadata(ffi_dir: Path) -> dict[str, Any]:
 
     Parameters:
     参数:
-    - ffi_dir: ast-grep FFI crate directory.
-      ast-grep FFI crate 所在目录。
+    - ffi_dir: Unified CodeKit FFI crate directory.
+      统一 CodeKit FFI crate 所在目录。
 
     Returns:
     返回:
@@ -310,7 +311,7 @@ def render_report(rows: list[DependencyLicenseRow]) -> str:
         "",
         "本文件由 `python scripts/generate_cargo_deny_notices.py` 通过 `cargo deny list --format json --layout crate` 自动生成。",
         "",
-        "适用范围：`ast-grep-ffi` Rust 动态库构建时进入非 dev 依赖图的第三方 crates。",
+        "适用范围：`codekit-ffi` Rust 动态库构建时进入非 dev 依赖图的第三方 crates。",
         "",
         "说明：",
         "",
@@ -370,7 +371,7 @@ def generate_report(root: Path) -> str:
     - str: Generated Markdown report text.
       生成后的 Markdown 报告文本。
     """
-    ffi_dir = root / "ast-grep-ffi"
+    ffi_dir = root / "codekit-ffi"
     cargo_deny_payload = load_cargo_deny_license_payload(ffi_dir)
     metadata = load_cargo_metadata(ffi_dir)
     rows = build_license_rows(cargo_deny_payload, build_package_index(metadata))

@@ -86,6 +86,7 @@ local function load_patch_runtime_helpers()
     local helpers = {
         load_ast_runtime_helpers = extract_upvalue_by_name(patch_entry, "load_ast_runtime_helpers"),
         validate_file_argument = extract_upvalue_by_name(patch_entry, "validate_file_argument"),
+        resolve_file_argument = extract_upvalue_by_name(patch_entry, "resolve_file_argument"),
         validate_structural_path_argument = extract_upvalue_by_name(patch_entry, "validate_structural_path_argument"),
         resolve_public_structural_path_argument = extract_upvalue_by_name(patch_entry, "resolve_public_structural_path_argument"),
         collect_ast_for_file = extract_upvalue_by_name(patch_entry, "collect_ast_for_file"),
@@ -274,7 +275,7 @@ end
 
 -- Normalize the required `nodes[]` payload into executable node requests.
 -- 将必填的 `nodes[]` 载荷规范化为可执行的节点请求。
-local function normalize_node_requests(args, helpers)
+local function normalize_node_requests(args, helpers, path_helpers, pwd_root)
     local requests = {}
     local raw_nodes = args and args.nodes
 
@@ -295,7 +296,14 @@ local function normalize_node_requests(args, helpers)
                 actual_type = type(node),
             })
         else
-            local file_path, file_error = helpers.validate_file_argument(node.file)
+            -- Root-relative or absolute file path resolved before AST lookup.
+            -- 在 AST 查找前解析的项目根相对或绝对文件路径。
+            local file_path, file_error = helpers.resolve_file_argument(
+                node.file,
+                path_helpers,
+                pwd_root,
+                string.format("nodes[%d].file", node_index)
+            )
             if file_error then
                 file_error.node_index = node_index
                 push_node_error_request(requests, node_index, node.file, node.structural_path, file_error)
@@ -462,7 +470,20 @@ return function(args)
         return render_node_source_error(ast_helpers_error)
     end
 
-    local requests, requests_error = normalize_node_requests(args, helpers)
+    -- Shared path contract exported by AST Detail for host-managed PWD resolution.
+    -- AST Detail 为宿主管理 PWD 解析导出的共享路径契约。
+    local path_helpers, path_helpers_error = ast_helpers.load_codekit_path_module()
+    if path_helpers_error then
+        return render_node_source_error(path_helpers_error)
+    end
+    -- Validated project root injected by VulcanCode when available.
+    -- VulcanCode 在可用时注入并完成校验的项目根路径。
+    local pwd_root, pwd_error = path_helpers.resolve_pwd_root(args and args.PWD)
+    if pwd_error then
+        return render_node_source_error(pwd_error)
+    end
+
+    local requests, requests_error = normalize_node_requests(args, helpers, path_helpers, pwd_root)
     if requests_error then
         return render_node_source_error(requests_error)
     end

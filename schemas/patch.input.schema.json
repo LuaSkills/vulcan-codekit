@@ -3,9 +3,13 @@
   "additionalProperties": false,
   "description": "Patch performs whole-node replacement for function/method targets only. The typical workflow is: first use node-source to read the exact current function/method source, then submit a complete replacement source through patch. The success result includes the actual post-write target lines and local context; node_hash/file_hash/range are optional advanced stale checks. This tool does not support enum, enum variant/member, struct field, type alias, or statement-level patching.",
   "properties": {
+    "PWD": {
+      "type": "string",
+      "description": "Optional host-managed absolute project or workspace root. VulcanCode hides and injects this parameter when a current project is available. Relative file and patches[].file values are resolved from this root; without a usable PWD, every file must be absolute."
+    },
     "file": {
       "type": "string",
-      "description": "Target file that contains the function or method node to replace. Required only in single mode; omit it when patches[] is non-empty."
+      "description": "Target file that contains the function or method node to replace. May be relative when PWD is available, otherwise must be absolute. Required only in single mode; omit it when patches[] is non-empty."
     },
     "structural_path": {
       "type": "string",
@@ -68,7 +72,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "description": "Target file that contains the function or method node to replace."
+            "description": "Target file that contains the function or method node to replace. May be relative when PWD is available, otherwise must be absolute."
           },
           "structural_path": {
             "type": "string",

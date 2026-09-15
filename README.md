@@ -10,12 +10,17 @@ It is not a generic toolkit that glues together `grep`, `AST`, and `LSP`. It is 
 
 The current LuaSkills naming scheme uses the canonical `skill_id-entry_name` form, so the recommended tool names are:
 
+- `vulcan-codekit-repo-map`
 - `vulcan-codekit-ast-tree`
 - `vulcan-codekit-ast-detail`
 - `vulcan-codekit-rg`
 - `vulcan-codekit-markdown-menu`
 - `vulcan-codekit-node-source`
 - `vulcan-codekit-patch`
+
+## Project Path Context
+
+All seven CodeKit tools declare the same optional top-level `PWD` parameter. When VulcanCode has a current project, it hides this host-managed parameter from the model and injects the absolute project root automatically. Tool paths such as `dir`, `paths`, `path`, `nodes[].file`, and `patches[].file` can therefore be project-relative. On another host, callers may provide an absolute `PWD` explicitly; without a usable `PWD`, all target paths must be absolute.
 
 In some MCP clients or host bindings, tool names may be exposed with underscores, such as `vulcan_codekit_ast_tree`. This is only a naming difference at the exposure layer. Semantically, it still maps to the same CodeKit entry points.
 
@@ -89,6 +94,28 @@ In other words, CodeKit is not a simple replacement for:
 It reorganizes these capabilities into a workflow protocol that is easier for Agents to consume.
 
 ## Core Capabilities
+
+### `vulcan-codekit-repo-map`
+
+Understand the repository before asking AST tools to enumerate individual code files.
+
+It scans one repository recursively and returns:
+
+- A directory-only tree with no file nodes
+- Complete ordinary-file, recognized-file, and unrecognized-file counts
+- Byte totals and recursive directory distributions
+- All languages detected by Tokei 15, without a language whitelist
+- Code, comment, blank, and total-line statistics for the repository and every visible directory
+- Explicit depth folding and incomplete-scan diagnostics
+
+Useful when:
+
+- You have just entered an unfamiliar repository
+- You do not know the repository scale or language mix
+- You need to choose the correct `ast-tree.dir` or `rg.dir`
+- A root-level AST Tree would be too broad or noisy
+
+Repo Map performs a complete recursive aggregation before limiting the model-visible directory depth. Hidden formal directories such as `.github` are included, while `.git`, build output, dependencies, and other high-noise directories remain hard excluded.
 
 ### `vulcan-codekit-ast-tree`
 
@@ -243,11 +270,12 @@ In `Vulcan CodeKit`, the recommended path is usually not:
 
 Instead, it is:
 
-1. Build a map with `ast-tree`
-2. Inspect skeletons with `ast-detail`
-3. Use anchors with `rg` to trace owner context
-4. Fetch precise node source with `node-source`
-5. Apply structural batch replacement with `patch`
+1. Build a repository-scale directory and statistics map with `repo-map`
+2. Run `ast-tree` only on the selected source directory
+3. Inspect skeletons with `ast-detail`
+4. Use anchors with `rg` to trace owner context inside a narrowed directory
+5. Fetch precise node source with `node-source`
+6. Apply structural batch replacement with `patch`
 
 That is:
 
@@ -336,6 +364,7 @@ This is not a small user-experience tweak. It is a structural upgrade to the cod
 
 ## Included Tools
 
+- `vulcan-codekit-repo-map`
 - `vulcan-codekit-ast-tree`
 - `vulcan-codekit-ast-detail`
 - `vulcan-codekit-rg`
@@ -352,22 +381,24 @@ This repository is the standalone source repository for the `vulcan-codekit` Lua
 - `schemas/`: external JSON Schema files for complex AI-facing tool inputs
 - `help/`: strict help flows and per-tool documentation
 - `skills/`: Codex skill instructions and Agent usage guidance
-- `ast-grep-ffi/`: Rust-based ast-grep FFI dynamic library project
+- `codekit-ffi/`: unified Rust dynamic library containing compatible ast-grep scanning and Tokei-powered repository statistics
 - `scripts/`: validation and packaging scripts for skill packages and FFI release artifacts
 
 This repository is no longer maintained as a demo skill. It is the release source for `vulcan-codekit`. Releases produce two types of artifacts:
 
 - LuaSkill package: includes `runtime/`, `rules/`, `schemas/`, `help/`, `skills/`, `dependencies.yaml`, and other runtime files
-- FFI component package: includes the platform-specific `vulcan_codekit_ast_grep_ffi` dynamic library
+- FFI component package: includes the platform-specific `vulcan_codekit_ffi` dynamic library
 
 ## Dependencies and Release Artifacts
 
 `dependencies.yaml` declares runtime dependencies. Current dependencies are split into two categories:
 
 - `rg`: still provided as a tool dependency for text search and Markdown file enumeration
-- `ast-grep-ffi`: provided as an FFI dependency for AST structure scanning, structural matching, and patch validation
+- `codekit-ffi`: provided as one FFI dependency for AST structure scanning, structural matching, patch validation, and Tokei-powered Repo Map statistics
 
-The current implementation no longer calls the raw `ast-grep` CLI. Instead, it uses the dynamic library built from `ast-grep-ffi/`. The Lua runtime loads the platform-specific dynamic library from the FFI dependency directory injected by LuaSkills. During local development, it also falls back to `ast-grep-ffi/target/release` and `ast-grep-ffi/target/debug`.
+The current implementation calls neither the raw `ast-grep` CLI nor a `tokei` executable. Both capabilities are Rust library dependencies inside the dynamic library built from `codekit-ffi/`. The Lua runtime loads the platform-specific dynamic library from the FFI dependency directory injected by LuaSkills. During local development, it also checks the exact `codekit-ffi/target/release` and `codekit-ffi/target/debug` paths.
+
+Version `0.2.0` replaces the former skill-private dependency identity `ast-grep-ffi` with `codekit-ffi`. Current LuaSkills update handling installs the new manifest dependency first and removes skill-private dependency roots that are no longer present after a successful update. The CodeKit loader never probes the retired library name, so an inert old directory left by an older host cannot be selected accidentally.
 
 The current release workflow builds and publishes FFI components only for these platforms:
 
@@ -390,19 +421,19 @@ The top-level directory inside the zip archive must be the runtime skill name:
 
 - `vulcan-codekit/`
 
-`ast-grep-ffi` is not bundled into the skill package itself. It is installed as a GitHub Release dependency through `dependencies.yaml`. The current accurate Release repository is:
+`codekit-ffi` is not bundled into the skill package itself. It is installed as a GitHub Release dependency through `dependencies.yaml`. The current accurate Release repository is:
 
 ```yaml
 repo: LuaSkills/vulcan-codekit
 ```
 
-The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports tag pushes and manual runs. The release version is read from `skill.yaml`; an optional manual `version` input may be provided only when it matches `v{skill.yaml.version}`.
+The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports tag pushes and manual rebuilds of an existing tag. It resolves and checks out the immutable tag before reading release metadata; the selected tag must match `v{tagged skill.yaml.version}`. Before building, the workflow also requires the tagged `codekit-ffi` Cargo package version and `dependencies.yaml` FFI version to match that same version.
 
 - `build_luaskill=on/off`: whether to build and upload the LuaSkill package
 - `luaskill_runner`: runner used to build the skill package
 - Platform-specific `*_runner` values: runner for each FFI platform, or `off` to skip that platform
 
-LuaSkill package builds and FFI native component builds can be run separately. As long as the release tag matches `skill.yaml.version`, all enabled artifacts are uploaded to the same GitHub Release. During runtime installation of FFI components, the LuaSkills dependency manager resolves the matching asset from the same Release according to the `version`, `repo`, and platform `asset_name` values in `dependencies.yaml`.
+LuaSkill package builds and FFI native component builds can be run separately. As long as the release tag and all three version declarations match, all enabled artifacts are uploaded to the same GitHub Release. Tag-triggered defaults build the LuaSkill plus all five declared FFI platforms. The workflow stages artifacts first and creates or updates the Release only after every enabled validation/build job succeeds; in-flight tag builds are never cancelled. Unified native assets are named `codekit-ffi-{platform}.zip`; their checksums are named `codekit-ffi-{platform}.sha256.txt`. During runtime installation, the LuaSkills dependency manager resolves the matching asset from the same Release according to the `version`, `repo`, and platform `asset_name` values in `dependencies.yaml`.
 
 The Rust FFI dependency license report is generated automatically by `cargo-deny`:
 
@@ -410,7 +441,7 @@ The Rust FFI dependency license report is generated automatically by `cargo-deny
 python .\scripts\generate_cargo_deny_notices.py
 ```
 
-The result is written to `THIRD_PARTY_LICENSES.md`. CI runs `cargo deny check -c deny.toml --exclude-dev licenses` under `ast-grep-ffi/` to check license policy, and verifies that the report still matches the current dependency graph.
+The result is written to `THIRD_PARTY_LICENSES.md`. CI runs `cargo deny --config deny.toml --exclude-dev check licenses` under `codekit-ffi/` to check the ast-grep and Tokei dependency graph, and verifies that the report still matches the current dependency graph.
 
 ## One-sentence Summary
 

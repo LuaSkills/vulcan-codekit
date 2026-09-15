@@ -11,6 +11,10 @@ Use this skill to choose the right `codekit-*` tool from your current state.
 
 The main agent should build the project map first, then decide whether deeper inspection, text narrowing, Markdown navigation, patching, or subagent delegation is needed.
 
+## Project Path Context
+
+All CodeKit tools declare an optional top-level `PWD`. VulcanCode hides and injects this host-managed absolute project root when a current project is available. Prefer project-relative `dir`, `paths`, `path`, and `file` values under that injected root. If the host does not inject a usable `PWD`, pass absolute target paths instead.
+
 ## Behavior Principles
 
 ### Think before coding
@@ -44,27 +48,31 @@ The main agent should build the project map first, then decide whether deeper in
 
 When analyzing code, ask these questions in order:
 
-1. **I do not know the target file yet**
+1. **I do not yet understand the repository size or directory distribution**
+   Use `vulcan-codekit-repo-map`.
+   Build a directory-only map with a complete file census and all-language Tokei statistics.
+
+2. **I know the relevant directory but not the target file yet**
    Use `vulcan-codekit-ast-tree`.
    Start from one directory and build a compact map before reading details.
 
-2. **I already have exact file paths**
+3. **I already have exact file paths**
    Use `vulcan-codekit-ast-detail`.
    Inspect file-level AST structure, symbols, and signatures.
 
-3. **I have a function name, keyword, log string, or regex clue**
+4. **I have a function name, keyword, log string, or regex clue**
    Use `vulcan-codekit-rg`.
    Narrow text matches back to the owning function, method, impl, or class context.
 
-4. **I need to find the right Markdown doc or section**
+5. **I need to find the right Markdown doc or section**
    Use `vulcan-codekit-markdown-menu`.
    Read heading structure first, then open body text only when needed.
 
-5. **I need full source for known functions or methods**
+6. **I need full source for known functions or methods**
    Use `vulcan-codekit-node-source`.
    Extract exact node bodies after `ast-detail` or `rg` has identified the owners.
 
-6. **I need to replace an entire function or method**
+7. **I need to replace an entire function or method**
    Use `vulcan-codekit-patch`.
    Only do this after the target function is already confirmed.
 
@@ -75,7 +83,8 @@ For source-code analysis, the decision tree above is the default route unless on
 CodeKit is the required default path for source-code analysis.
 
 1. **Project mapping**
-   For unfamiliar repositories or non-trivial source directories, `vulcan-codekit-ast-tree` is required before deep inspection.
+   For unfamiliar repositories, `vulcan-codekit-repo-map` is required before selecting an AST or text-search scope.
+   After Repo Map identifies the relevant source subtree, use `vulcan-codekit-ast-tree` on exactly one selected directory.
    Do not start codebase exploration with plain file listing or plain file reading tools.
 
 2. **Structural search**
@@ -95,6 +104,7 @@ CodeKit is the required default path for source-code analysis.
 
 ## Output Prediction
 
+- `vulcan-codekit-repo-map` returns a directory-only tree, complete/recognized/unrecognized file counts, byte totals, all-language Tokei statistics, and explicit folding diagnostics.
 - `vulcan-codekit-ast-tree` returns a grouped Markdown tree with compact metrics such as lines, types, impl blocks, and functions.
 - `vulcan-codekit-rg` returns matched lines together with the owning function, method, impl, or class context.
 - `vulcan-codekit-ast-detail` returns a structured symbol tree with nesting, signatures, and line ownership.
@@ -104,7 +114,7 @@ CodeKit is the required default path for source-code analysis.
 
 ## Main-Agent Rule
 
-For unfamiliar repositories, the main agent should call `vulcan-codekit-ast-tree` first and build the global map itself.
+For unfamiliar repositories, the main agent should call `vulcan-codekit-repo-map` first and build the global scale/directory map itself, then call `vulcan-codekit-ast-tree` only on a selected source directory.
 
 Do this before:
 
@@ -120,11 +130,26 @@ Why:
 
 ## Tool Notes
 
+### `vulcan-codekit-repo-map`
+
+Use when:
+
+- the repository scale, directory distribution, and language mix are unknown
+- the correct `ast-tree.dir` or `rg.dir` scope has not yet been established
+
+Remember:
+
+- pass exactly one repository or directory
+- keep ordinary ignore rules enabled by default
+- do not request language or extension filters; Repo Map deliberately covers every language recognized by Tokei
+- it returns directory nodes and aggregate statistics, never a file tree
+- depth folding happens after a complete recursive scan, so root and parent totals remain complete
+
 ### `vulcan-codekit-ast-tree`
 
 Use when:
 
-- the repository or subdirectory is unfamiliar
+- Repo Map has already selected a source directory but its individual code files remain unknown
 - the goal is to choose candidate files first
 
 Remember:
@@ -219,11 +244,13 @@ Remember:
 
 ### Unknown codebase
 
-1. Run `vulcan-codekit-ast-tree` on the most relevant source directory.
-2. Pick candidate files from the grouped output.
-3. Run `vulcan-codekit-ast-detail` on those exact files.
-4. If a symbol or keyword becomes important, switch to `vulcan-codekit-rg`.
-5. Use `vulcan-codekit-node-source` when you need exact function or method bodies.
+1. Run `vulcan-codekit-repo-map` on the repository root.
+2. Select the most relevant source directory from its directory and code distribution.
+3. Run `vulcan-codekit-ast-tree` on that selected directory.
+4. Pick candidate files from the grouped output.
+5. Run `vulcan-codekit-ast-detail` on those exact files.
+6. If a symbol or keyword becomes important, switch to `vulcan-codekit-rg` using the narrowed directory.
+7. Use `vulcan-codekit-node-source` when you need exact function or method bodies.
 
 ### Known symbol or keyword
 
@@ -256,6 +283,7 @@ Subagents are not good for:
 
 ## Failure and Fallback
 
+- If `vulcan-codekit-repo-map` reports folded directories, choose the most relevant returned directory and rerun Repo Map there instead of immediately scanning the whole repository with AST Tree.
 - If `vulcan-codekit-ast-tree` fails because large-result cache writing fails, retry once with a smaller directory or narrower `extensions`. If needed, fall back to file search plus direct reads.
 - If `vulcan-codekit-rg` returns too many matches, narrow the regex or shrink the directory scope before calling again.
 - If `vulcan-codekit-ast-detail` rejects the input, first confirm that the input is an explicit file list rather than a directory.
@@ -275,6 +303,7 @@ Only fall back when CodeKit adds near-zero value, such as:
 
 For source code:
 
+- use `vulcan-codekit-repo-map` before AST Tree when repository scale and the correct directory scope are unknown
 - use `vulcan-codekit-rg` instead of plain grep when searching for symbols, methods, logs, or patterns
 - use `vulcan-codekit-ast-detail` instead of plain file reading when inspecting code structure
 - use `vulcan-codekit-node-source` instead of reading whole files when one or more function/method bodies are enough

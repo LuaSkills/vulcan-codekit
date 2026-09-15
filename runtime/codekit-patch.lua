@@ -120,6 +120,9 @@ local function load_ast_runtime_helpers()
     end
 
     local helpers = {
+        -- Shared loader required by patch and node-source PWD resolution.
+        -- patch 与 node-source 的 PWD 解析所需共享加载器。
+        load_codekit_path_module = extract_upvalue_by_name(ast_entry, "load_codekit_path_module"),
         collect_files = extract_upvalue_by_name(ast_entry, "collect_files"),
         find_binary = extract_upvalue_by_name(ast_entry, "find_binary"),
         run_language_scan = extract_upvalue_by_name(ast_entry, "run_language_scan"),
@@ -173,6 +176,33 @@ local function validate_file_argument(value)
         }
     end
     return normalized, nil
+end
+
+--[[
+Resolve one public file argument through PWD before regular-file validation.
+在普通文件校验前通过 PWD 解析一个公开文件参数。
+
+Parameters / 参数:
+- value(any): Public file value. / 公开文件值。
+- path_helpers(table): Shared PWD path-resolution contract. / 共享 PWD 路径解析契约。
+- pwd_root(string|nil): Validated project root. / 已校验的项目根路径。
+- field_name(string): Public field identity used in errors. / 错误中使用的公开字段标识。
+
+Returns / 返回值:
+- string|nil: Validated absolute regular-file path. / 已校验的绝对普通文件路径。
+- table|nil: Structured path or file error. / 结构化路径或文件错误。
+]]
+local function resolve_file_argument(value, path_helpers, pwd_root, field_name)
+    if type(value) ~= "string" or trim(value) == "" then
+        return validate_file_argument(value)
+    end
+    -- Absolute path resolved through the shared host-managed PWD convention.
+    -- 通过共享宿主管理 PWD 公约解析出的绝对路径。
+    local resolved, resolve_error = path_helpers.resolve_input_path(value, field_name or "file", pwd_root)
+    if resolve_error then
+        return nil, resolve_error
+    end
+    return validate_file_argument(resolved)
 end
 
 --[[
@@ -1513,9 +1543,16 @@ end
 
 -- Build one normalized patch request from raw arguments.
 -- 从原始参数构造一个规范化 patch 请求。
-local function build_patch_request(index, raw_patch)
+local function build_patch_request(index, raw_patch, path_helpers, pwd_root, file_field_name)
     local source = type(raw_patch) == "table" and raw_patch or {}
-    local file_path, file_error = validate_file_argument(source.file)
+    -- Root-relative or absolute file path resolved before patch validation.
+    -- 在 patch 校验前解析的项目根相对或绝对文件路径。
+    local file_path, file_error = resolve_file_argument(
+        source.file,
+        path_helpers,
+        pwd_root,
+        file_field_name
+    )
     local structural_path, structural_path_error = resolve_public_structural_path_argument(source)
     local replacement_text, replacement_error = validate_replacement_argument(source.replacement)
     local precondition, precondition_error = parse_patch_precondition(source.precondition)
@@ -1565,7 +1602,7 @@ end
 
 -- Normalize single-patch arguments and patches[] payloads.
 -- 统一规范化单 patch 参数与 patches[] 载荷。
-local function normalize_patch_requests(args)
+local function normalize_patch_requests(args, path_helpers, pwd_root)
     local request = type(args) == "table" and args or {}
     local raw_patches = request.patches
     local patches = {}
@@ -1577,10 +1614,16 @@ local function normalize_patch_requests(args)
             return patches
         end
         for index, raw_patch in ipairs(raw_patches) do
-            table.insert(patches, build_patch_request(index, raw_patch))
+            table.insert(patches, build_patch_request(
+                index,
+                raw_patch,
+                path_helpers,
+                pwd_root,
+                string.format("patches[%d].file", index)
+            ))
         end
     else
-        table.insert(patches, build_patch_request(1, request))
+        table.insert(patches, build_patch_request(1, request, path_helpers, pwd_root, "file"))
     end
     return patches
 end
@@ -2274,9 +2317,21 @@ end
 -- Execute a batch patch request with atomic or partial application semantics.
 -- 按 atomic 或部分应用语义执行批量 patch 请求。
 local function execute_patch_batch(args, helper_bundle)
+    -- Shared path contract exported by AST Detail for host-managed PWD resolution.
+    -- AST Detail 为宿主管理 PWD 解析导出的共享路径契约。
+    local path_helpers, path_helpers_error = helper_bundle.load_codekit_path_module()
+    if path_helpers_error then
+        return render_patch_error(path_helpers_error)
+    end
+    -- Validated project root injected by VulcanCode when available.
+    -- VulcanCode 在可用时注入并完成校验的项目根路径。
+    local pwd_root, pwd_error = path_helpers.resolve_pwd_root(args and args.PWD)
+    if pwd_error then
+        return render_patch_error(pwd_error)
+    end
     local atomic = normalize_atomic_argument(args and args.atomic)
     local max_patches = normalize_max_patches_argument(args and args.max_patches)
-    local patch_requests = normalize_patch_requests(args)
+    local patch_requests = normalize_patch_requests(args, path_helpers, pwd_root)
     local results_by_index = {}
     local plans = {}
 
@@ -2457,6 +2512,7 @@ return function(args)
     if args and args.__codekit_helper_probe == "__never__" then
         return {
             validate_file_argument = validate_file_argument,
+            resolve_file_argument = resolve_file_argument,
             validate_structural_path_argument = validate_structural_path_argument,
             resolve_public_structural_path_argument = resolve_public_structural_path_argument,
             collect_ast_for_file = collect_ast_for_file,

@@ -3,6 +3,10 @@
   "additionalProperties": false,
   "description": "Node-source is the read step of CodeKit's function/method whole-node replacement workflow. Use it to fetch the exact current function/method source before review or before sending a complete replacement to patch. Normal output contains the current source and target location without runtime hashes or overflow metadata. Non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are not returned.",
   "properties": {
+    "PWD": {
+      "type": "string",
+      "description": "Optional host-managed absolute project or workspace root. VulcanCode hides and injects this parameter when a current project is available. Relative nodes[].file values are resolved from this root; without a usable PWD, every file must be absolute."
+    },
     "nodes": {
       "type": "array",
       "description": "Required node input. Each item must include file and structural_path for a function/method target. structural_path is one slash-separated structural path suffix, not a regex or glob. For same-file batches repeat the same file or use newline-separated structural_path values in one item.",
@@ -12,7 +16,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "description": "Explicit source file path that owns the target function or method node."
+            "description": "Source file path that owns the target function or method node. May be relative when PWD is available, otherwise must be absolute."
           },
           "structural_path": {
             "type": "string",

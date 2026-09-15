@@ -317,6 +317,9 @@ local function load_ast_runtime_helpers()
     end
 
     local helpers = {
+        -- Shared loader required by RG PWD resolution.
+        -- RG 的 PWD 解析所需共享加载器。
+        load_codekit_path_module = extract_upvalue_by_name(ast_entry, "load_codekit_path_module"),
         validate_extension_argument = extract_upvalue_by_name(ast_entry, "validate_extension_argument"),
         validate_noignore_argument = extract_upvalue_by_name(ast_entry, "validate_noignore_argument"),
         collect_files = extract_upvalue_by_name(ast_entry, "collect_files"),
@@ -348,12 +351,14 @@ Validate the directory argument. It must be a non-empty string pointing to an ex
 
 参数 / Parameters:
 - value(any): 用户传入的目录参数 / User-provided directory argument.
+- path_helpers(table): 共享 PWD 路径解析契约 / Shared PWD path-resolution contract.
+- pwd_root(string|nil): 已校验的项目根路径 / Validated project root.
 
 返回 / Returns:
 - string|nil: 规范化后的目录路径 / Normalized directory path.
 - table|nil: 参数非法时返回结构化错误对象 / Structured error object when invalid.
 ]]
-local function validate_directory_argument(value)
+local function validate_directory_argument(value, path_helpers, pwd_root)
     if type(value) ~= "string" or trim(value) == "" then
         return nil, {
             error = "invalid_dir_argument",
@@ -362,7 +367,16 @@ local function validate_directory_argument(value)
         }
     end
 
+    -- Trimmed directory text before PWD-relative resolution.
+    -- 执行 PWD 相对解析前裁剪后的目录文本。
     local normalized = trim(value)
+    -- Absolute directory path resolved through the shared PWD convention.
+    -- 通过共享 PWD 公约解析出的绝对目录路径。
+    local resolved, resolve_error = path_helpers.resolve_input_path(normalized, "dir", pwd_root)
+    if resolve_error then
+        return nil, resolve_error
+    end
+    normalized = resolved
     if not vulcan.fs.exists(normalized) then
         return nil, {
             error = "dir_not_found",
@@ -1386,7 +1400,20 @@ return function(args)
         return render_codekit_error_markdown("CodeKit RG Error", helper_error)
     end
 
-    local target_directory, dir_error = validate_directory_argument(args and args.dir)
+    -- Shared path contract exported by AST Detail for host-managed PWD resolution.
+    -- AST Detail 为宿主管理 PWD 解析导出的共享路径契约。
+    local path_helpers, path_helpers_error = helper_bundle.load_codekit_path_module()
+    if path_helpers_error then
+        return render_codekit_error_markdown("CodeKit RG Error", path_helpers_error)
+    end
+    -- Validated project root injected by VulcanCode when available.
+    -- VulcanCode 在可用时注入并完成校验的项目根路径。
+    local pwd_root, pwd_error = path_helpers.resolve_pwd_root(args and args.PWD)
+    if pwd_error then
+        return render_codekit_error_markdown("CodeKit RG Error", pwd_error)
+    end
+
+    local target_directory, dir_error = validate_directory_argument(args and args.dir, path_helpers, pwd_root)
     if dir_error then
         return render_codekit_error_markdown("CodeKit RG Error", dir_error)
     end

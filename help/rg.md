@@ -2,6 +2,11 @@
 
 Use this workflow when you already have a text anchor and need to find the owning structure.
 
+Path context:
+
+- `PWD` is an optional absolute project or workspace root. VulcanCode hides and injects it when a current project is available.
+- `dir` may be relative to `PWD`; without a usable `PWD`, it must be absolute
+
 Best for:
 
 - log strings

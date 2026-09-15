@@ -47,19 +47,61 @@ jobs:
               raise SystemExit("LuaSkill package must not contain a luaskills-vulcan-codekit/ root directory")
           if not any(name.startswith("vulcan-codekit/schemas/") for name in names):
               raise SystemExit("LuaSkill package must contain the schemas/ directory contents")
+          if "vulcan-codekit/runtime/codekit-path.lua" not in names:
+              raise SystemExit("LuaSkill package must contain the shared host-managed PWD path module")
 
-      - name: Check ast-grep FFI dependency licenses
-        run: cargo deny check -c deny.toml --exclude-dev licenses
-        working-directory: ast-grep-ffi
+      - name: Check unified CodeKit FFI dependency licenses
+        run: cargo deny --config deny.toml --exclude-dev check licenses
+        working-directory: codekit-ffi
 
       - name: Check generated dependency license report
         run: python ./scripts/generate_cargo_deny_notices.py --check
 
-      - name: Test ast-grep FFI crate
-        run: cargo test --manifest-path ast-grep-ffi/Cargo.toml
+      - name: Test unified CodeKit FFI crate
+        run: |
+          cargo fmt --manifest-path codekit-ffi/Cargo.toml --check
+          cargo clippy --manifest-path codekit-ffi/Cargo.toml --all-targets --locked -- -D warnings
+          cargo test --manifest-path codekit-ffi/Cargo.toml --locked
 
-      - name: Build ast-grep FFI release path smoke
-        run: cargo build --manifest-path ast-grep-ffi/Cargo.toml --release --target x86_64-unknown-linux-gnu --target-dir target
+      - name: Build unified CodeKit FFI release path smoke
+        run: cargo build --manifest-path codekit-ffi/Cargo.toml --release --locked --target x86_64-unknown-linux-gnu --target-dir target
 
-      - name: Package ast-grep FFI release path smoke
-        run: python ./scripts/package_ffi.py --platform linux-x64 --library-path target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so --out-dir dist-ffi-smoke
+      - name: Execute unified CodeKit FFI public ABI smoke
+        run: python ./scripts/smoke_ffi.py --library-path target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so --repo-root .
+
+      - name: Package unified CodeKit FFI release path smoke
+        run: python ./scripts/package_ffi.py --platform linux-x64 --library-path target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so --out-dir dist-ffi-smoke
+
+      - name: Check unified CodeKit FFI archive contract
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          # Resolve the exact smoke archive and checksum produced by the release packager.
+          # 解析发布打包器生成的精确 smoke 归档与校验文件。
+          package_path = Path("dist-ffi-smoke/codekit-ffi-linux-x64.zip")
+          checksum_path = Path("dist-ffi-smoke/codekit-ffi-linux-x64.sha256.txt")
+          # Read archive members before validating the complete compliance payload.
+          # 在校验完整合规载荷前读取归档成员。
+          with ZipFile(package_path) as archive:
+              names = set(archive.namelist())
+
+          # Define the exact required archive paths for the Linux smoke platform.
+          # 定义 Linux smoke 平台要求的精确归档路径。
+          required_names = {
+              "libvulcan_codekit_ffi.so",
+              "licenses/LICENSE",
+              "licenses/THIRD_PARTY_NOTICES.md",
+              "licenses/THIRD_PARTY_LICENSES.md",
+          }
+          if names != required_names:
+              raise SystemExit(f"unexpected CodeKit FFI archive members: {sorted(names)}")
+
+          # Compare the emitted checksum with the actual archive digest.
+          # 将输出的校验值与归档实际摘要进行比较。
+          expected_digest = checksum_path.read_text(encoding="utf-8").split()[0]
+          actual_digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
+          if actual_digest != expected_digest:
+              raise SystemExit("CodeKit FFI checksum does not match the packaged archive")

@@ -2,6 +2,12 @@
 
 Use this workflow when the right Markdown document or heading is still unknown.
 
+Path context:
+
+- `PWD` is an optional absolute project or workspace root. VulcanCode hides and injects it when a current project is available.
+- every newline-separated `path` item may be relative to `PWD`; the omitted-path default `.` means that root
+- without a usable `PWD`, every path must be absolute
+
 Best for:
 
 - doc triage

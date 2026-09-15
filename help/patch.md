@@ -2,6 +2,11 @@
 
 Use this workflow only when the target functions or methods are already confirmed, `node-source` has supplied the current node source, and every replacement is a whole-function or whole-method replacement.
 
+Path context:
+
+- `PWD` is an optional absolute project or workspace root. VulcanCode hides and injects it when a current project is available.
+- top-level `file` and every `patches[].file` may be relative to `PWD`; without a usable `PWD`, every file must be absolute
+
 Best for:
 
 - AST-safe whole-function replacement

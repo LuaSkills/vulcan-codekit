@@ -229,6 +229,9 @@ local function load_ast_runtime_helpers()
     end
 
     local helpers = {
+        -- Shared loader required by Markdown Menu PWD resolution.
+        -- Markdown Menu 的 PWD 解析所需共享加载器。
+        load_codekit_path_module = extract_upvalue_by_name(ast_entry, "load_codekit_path_module"),
         validate_path_argument = extract_upvalue_by_name(ast_entry, "validate_path_argument"),
         validate_recursive_argument = extract_upvalue_by_name(ast_entry, "validate_recursive_argument"),
         validate_noignore_argument = extract_upvalue_by_name(ast_entry, "validate_noignore_argument"),
@@ -728,7 +731,26 @@ return function(args)
         return render_codekit_error_markdown("CodeKit Markdown Menu Error", helpers_error)
     end
 
+    -- Shared path contract exported by AST Detail for host-managed PWD resolution.
+    -- AST Detail 为宿主管理 PWD 解析导出的共享路径契约。
+    local path_helpers, path_helpers_error = helpers.load_codekit_path_module()
+    if path_helpers_error then
+        return render_codekit_error_markdown("CodeKit Markdown Menu Error", path_helpers_error)
+    end
+    -- Validated project root injected by VulcanCode when available.
+    -- VulcanCode 在可用时注入并完成校验的项目根路径。
+    local pwd_root, pwd_error = path_helpers.resolve_pwd_root(args and args.PWD)
+    if pwd_error then
+        return render_codekit_error_markdown("CodeKit Markdown Menu Error", pwd_error)
+    end
+
     local target_paths, path_error = helpers.validate_path_argument(args and args.path)
+    if path_error then
+        return render_codekit_error_markdown("CodeKit Markdown Menu Error", path_error)
+    end
+    -- Absolute Markdown targets resolved from every public path value.
+    -- 从每个公开 path 值解析出的绝对 Markdown 目标路径。
+    target_paths, path_error = path_helpers.resolve_input_paths(target_paths, "path", pwd_root)
     if path_error then
         return render_codekit_error_markdown("CodeKit Markdown Menu Error", path_error)
     end

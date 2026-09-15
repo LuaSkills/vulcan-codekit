@@ -4,7 +4,9 @@ luac.out
 # Build artifacts
 dist/
 target/
-ast-grep-ffi/target/
+codekit-ffi/target/
+__pycache__/
+*.pyc
 
 # Local planning records should stay out of released repository history.
 # 本地计划记录不应进入发布仓库历史。

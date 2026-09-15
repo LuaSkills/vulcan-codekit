@@ -1,10 +1,15 @@
 # `vulcan-codekit-ast-tree`
 
-Use this workflow first when the repository or source directory is still unfamiliar.
+Use this workflow after Repo Map has identified the source directory to inspect. If the repository or source scope is still unfamiliar, run `vulcan-codekit-repo-map` first.
+
+Path context:
+
+- `PWD` is an optional absolute project or workspace root. VulcanCode hides and injects it when a current project is available.
+- `dir` may be relative to `PWD`; without a usable `PWD`, it must be absolute
 
 Best for:
 
-- building the project map
+- building a per-file AST map inside one selected source directory
 - choosing candidate files
 - identifying the heavy modules before deep reads
 

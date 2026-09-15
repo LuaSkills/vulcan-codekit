@@ -1,11 +1,14 @@
 name: vulcan-codekit
-version: 0.1.12
+version: 0.2.0
 debug: false
 help:
   main:
     description: Main Vulcan CodeKit help and workflow navigation.
     file: help/vulcan_codekit_skill.lua
   topics:
+    - name: repo-map
+      description: Repository-first directory tree and all-language code statistics workflow.
+      file: help/repo-map.md
     - name: ast-detail
       description: Exact-file AST structure inspection workflow.
       file: help/ast-detail.md
@@ -25,15 +28,41 @@ help:
       description: Safe whole-function replacement workflow paired with node-source output.
       file: help/patch.md
 entries:
+  - name: repo-map
+    description: "[REPOSITORY FIRST MAP] Use this as the first step in an unfamiliar repository. Returns a directory-only tree, complete file census, Tokei all-language statistics, and explicit folding diagnostics without exposing a file tree."
+    lua_entry: runtime/codekit-repo-map.lua
+    lua_module: codekit_repo_map
+    help: repo-map
+    parameters:
+      - name: PWD
+        type: string
+        description: "Optional host-managed absolute project or workspace root. VulcanCode hides and injects this parameter when a current project is available. Relative dir values are resolved from this root; without a usable PWD, dir must be absolute."
+        required: false
+      - name: dir
+        type: string
+        description: "Required. Exactly one existing repository or directory to scan recursively; files and multi-path input are rejected. May be relative when PWD is available, otherwise must be absolute."
+        required: true
+      - name: max_depth
+        type: integer
+        description: "Optional model-visible directory depth from 1 to 8 (default: 3). The complete repository is still scanned and aggregated before deeper directory records are folded."
+        required: false
+      - name: noignore
+        type: boolean
+        description: "Optional. Disable ordinary .gitignore, .ignore, and .tokeignore rules only when true. CodeKit hard exclusions such as .git, target, node_modules, and dist remain active."
+        required: false
   - name: ast-detail
     description: "[FILE AST DETAIL] Inspect one or more exact source files and return plain Markdown AST details. Use this only after you already know the exact files, typically from codekit-ast-tree or codekit-rg."
     lua_entry: runtime/codekit-ast-detail.lua
     lua_module: codekit_ast_detail
     help: ast-detail
     parameters:
+      - name: PWD
+        type: string
+        description: "Optional host-managed absolute project or workspace root. VulcanCode hides and injects this parameter when a current project is available. Relative path values in paths are resolved from this root; without a usable PWD, every path must be absolute."
+        required: false
       - name: paths
         type: string
-        description: "One or more explicit source-file paths separated by newlines (\\n). This tool does not accept directories or mixed path sets, and it supports at most 20 files per request."
+        description: "One or more explicit source-file paths separated by newlines (\\n). Paths may be relative when PWD is available, otherwise every path must be absolute. This tool does not accept directories or mixed path sets, and it supports at most 20 files per request."
         required: true
       - name: comment
         type: boolean
@@ -45,9 +74,13 @@ entries:
     lua_module: codekit_rg
     help: rg
     parameters:
+      - name: PWD
+        type: string
+        description: "Optional host-managed absolute project or workspace root. VulcanCode hides and injects this parameter when a current project is available. Relative dir values are resolved from this root; without a usable PWD, dir must be absolute."
+        required: false
       - name: dir
         type: string
-        description: "Required. Target directory to search recursively; must point to an existing directory."
+        description: "Required. Target directory to search recursively; must point to an existing directory. May be relative when PWD is available, otherwise must be absolute."
         required: true
       - name: extensions
         type: string
@@ -71,9 +104,13 @@ entries:
     lua_module: codekit_markdown_menu
     help: markdown-menu
     parameters:
+      - name: PWD
+        type: string
+        description: "Optional host-managed absolute project or workspace root. VulcanCode hides and injects this parameter when a current project is available. Relative path values, including the default '.', are resolved from this root; without a usable PWD, every path must be absolute."
+        required: false
       - name: path
         type: string
-        description: "Target path. Supports a single file/directory, or multiple paths separated by newlines (\\n). Directory and file paths may be mixed in one request and duplicate Markdown files are automatically removed."
+        description: "Target path. Supports a single file/directory, or multiple paths separated by newlines (\\n). Paths may be relative when PWD is available, otherwise every path must be absolute. Directory and file paths may be mixed in one request and duplicate Markdown files are automatically removed."
         required: false
       - name: recursive
         type: boolean
@@ -95,9 +132,13 @@ entries:
     lua_module: codekit_ast_tree
     help: tree
     parameters:
+      - name: PWD
+        type: string
+        description: "Optional host-managed absolute project or workspace root. VulcanCode hides and injects this parameter when a current project is available. Relative dir values are resolved from this root; without a usable PWD, dir must be absolute."
+        required: false
       - name: dir
         type: string
-        description: "Exactly one existing directory path to scan recursively. Files, newline-separated path lists, and multiple directories are rejected."
+        description: "Exactly one existing directory path to scan recursively. May be relative when PWD is available, otherwise must be absolute. Files, newline-separated path lists, and multiple directories are rejected."
         required: true
       - name: extensions
         type: string

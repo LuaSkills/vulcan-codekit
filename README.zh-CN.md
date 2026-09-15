@@ -10,12 +10,17 @@
 
 当前 LuaSkills 新命名采用 `skill_id-entry_name` 的 canonical 形式，因此推荐直接使用：
 
+- `vulcan-codekit-repo-map`
 - `vulcan-codekit-ast-tree`
 - `vulcan-codekit-ast-detail`
 - `vulcan-codekit-rg`
 - `vulcan-codekit-markdown-menu`
 - `vulcan-codekit-node-source`
 - `vulcan-codekit-patch`
+
+## 项目路径上下文
+
+七个 CodeKit 工具统一声明了可选的顶层 `PWD` 参数。当 VulcanCode 存在当前项目时，宿主会向模型隐藏这个受管参数，并自动注入项目根目录的绝对路径。因此，`dir`、`paths`、`path`、`nodes[].file`、`patches[].file` 等工具路径都可以写成项目相对路径。其他宿主也可以显式传入绝对 `PWD`；没有可用 `PWD` 时，所有目标路径必须是绝对路径。
 
 在部分 MCP 客户端或宿主绑定里，工具名可能会被转写成下划线形式，例如 `vulcan_codekit_ast_tree`。这只是暴露层命名差异，语义上仍对应同一组 CodeKit 入口。
 
@@ -89,6 +94,28 @@
 它更像把这些能力重新组织成一套适合 Agent 消费的工作流协议。
 
 ## 核心能力
+
+### `vulcan-codekit-repo-map`
+
+先理解仓库，再让 AST 工具枚举具体代码文件。
+
+它会递归扫描一个仓库并返回：
+
+- 不包含文件节点的纯目录树
+- 全部普通文件、Tokei 已识别文件和未识别文件数量
+- 文件总字节数与递归目录分布
+- Tokei 15 检测到的全部语言，不使用语言白名单
+- 仓库与每个可见目录的代码、注释、空行和总行数
+- 显式的深度折叠与不完整扫描诊断
+
+适合场景：
+
+- 第一次进入陌生仓库
+- 不知道仓库规模或语言构成
+- 需要确定正确的 `ast-tree.dir` 或 `rg.dir`
+- 从根目录直接执行 AST Tree 会过宽或噪音过大
+
+Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.github` 等正式隐藏目录会被包含，而 `.git`、构建产物、依赖目录及其他高噪音目录始终强制排除。
 
 ### `vulcan-codekit-ast-tree`
 
@@ -242,11 +269,12 @@
 
 而是：
 
-1. `ast-tree` 建图
-2. `ast-detail` 看骨架
-3. `rg` 用锚点反查 owner
-4. `node-source` 获取精确节点源码
-5. `patch` 批量结构化替换
+1. `repo-map` 建立仓库级目录与统计地图
+2. 只对选定源码目录执行 `ast-tree`
+3. `ast-detail` 看骨架
+4. 在缩小后的目录中用 `rg` 锚点反查 owner
+5. `node-source` 获取精确节点源码
+6. `patch` 批量结构化替换
 
 也就是：
 
@@ -335,6 +363,7 @@
 
 ## 当前包含的工具
 
+- `vulcan-codekit-repo-map`
 - `vulcan-codekit-ast-tree`
 - `vulcan-codekit-ast-detail`
 - `vulcan-codekit-rg`
@@ -351,22 +380,24 @@
 - `schemas/`：复杂 AI 工具输入使用的外部 JSON Schema 文件
 - `help/`：严格帮助流与各工具说明
 - `skills/`：Codex 技能说明与 Agent 使用指引
-- `ast-grep-ffi/`：基于 Rust 的 ast-grep FFI 动态库项目
+- `codekit-ffi/`：统一 Rust 动态库项目，同时承载兼容 ast-grep 扫描与 Tokei 仓库统计
 - `scripts/`：skill 包与 FFI release 产物的校验、打包脚本
 
 仓库不再作为 demo skill 维护，而是作为 `vulcan-codekit` 的发布源。发布时会生成两类产物：
 
 - LuaSkill 包：包含 `runtime/`、`rules/`、`schemas/`、`help/`、`skills/`、`dependencies.yaml` 等运行所需文件
-- FFI 组件包：包含平台对应的 `vulcan_codekit_ast_grep_ffi` 动态库
+- FFI 组件包：包含平台对应的 `vulcan_codekit_ffi` 动态库
 
 ## 依赖与发布产物
 
 `dependencies.yaml` 负责声明运行时依赖。当前依赖分为两类：
 
 - `rg`：仍作为工具依赖提供文本搜索与 Markdown 文件枚举能力
-- `ast-grep-ffi`：作为 FFI 依赖提供 AST 结构扫描、结构匹配和 patch 校验能力
+- `codekit-ffi`：作为统一 FFI 依赖提供 AST 结构扫描、结构匹配、patch 校验与基于 Tokei 的 Repo Map 统计
 
-当前 `ast-grep` 不再通过原始 CLI 调用，而是由 `ast-grep-ffi/` 构建出的动态库承载。Lua 运行时代码会从 LuaSkills 注入的 FFI 依赖目录加载对应平台的动态库；本地开发时也会回退查找 `ast-grep-ffi/target/release` 与 `ast-grep-ffi/target/debug`。
+当前既不调用原始 `ast-grep` CLI，也不调用外部 `tokei` 可执行文件；两项能力都以 Rust 库依赖集成在 `codekit-ffi/` 构建出的统一动态库中。Lua 运行时代码会从 LuaSkills 注入的 FFI 依赖目录加载对应平台的动态库；本地开发时只检查精确的 `codekit-ffi/target/release` 与 `codekit-ffi/target/debug` 路径。
+
+`0.2.0` 会把原有 skill 私有依赖身份 `ast-grep-ffi` 替换为 `codekit-ffi`。当前 LuaSkills 更新流程会先安装新清单依赖，并在更新成功后清理新清单中已经不存在的旧 skill 私有依赖根目录。CodeKit 加载器不会探测退役动态库名称，因此旧版宿主即使遗留了不再使用的目录，也不会被误加载。
 
 当前 release workflow 只构建并发布以下平台的 FFI 组件：
 
@@ -389,19 +420,19 @@
 
 - `vulcan-codekit/`
 
-`ast-grep-ffi` 不打进技能包本体，而是由 `dependencies.yaml` 通过 GitHub Release 依赖安装。当前准确的 Release 仓库地址是：
+`codekit-ffi` 不打进技能包本体，而是由 `dependencies.yaml` 通过 GitHub Release 依赖安装。当前准确的 Release 仓库地址是：
 
 ```yaml
 repo: LuaSkills/vulcan-codekit
 ```
 
-GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push 与手动运行。发布版本会从 `skill.yaml` 自动读取；手动 `version` 输入是可选的，且只有与 `v{skill.yaml.version}` 一致时才允许使用。
+GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push，以及对一个已存在标签进行手动重建。workflow 会先解析并检出不可变标签，再读取发布元数据；所选标签必须与 `v{该标签内 skill.yaml.version}` 一致。构建开始前，workflow 还会强制要求标签内的 `codekit-ffi` Cargo package 版本和 `dependencies.yaml` 中的 FFI 版本与技能版本完全一致。
 
 - `build_luaskill=on/off`：是否构建并上传 LuaSkill 技能包
 - `luaskill_runner`：技能包构建 runner
 - 各平台 `*_runner`：对应 FFI 平台 runner，设为 `off` 即跳过该平台
 
-LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；只要 release tag 与 `skill.yaml.version` 一致，所有启用的产物都会上传到同一个 GitHub Release。运行时安装 FFI 组件时，LuaSkills 依赖管理器会根据 `dependencies.yaml` 中的 `version`、`repo` 与平台 `asset_name` 解析同一个 Release 下的对应资产。
+LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；只要 release tag 与三处版本声明全部一致，所有启用的产物都会上传到同一个 GitHub Release。标签自动触发时默认构建 LuaSkill 与声明的五个 FFI 平台。workflow 会先暂存全部产物，只有所有启用的校验与构建任务成功后才创建或更新 Release，并且不会取消正在执行的标签构建。统一原生资产命名为 `codekit-ffi-{platform}.zip`，对应校验文件命名为 `codekit-ffi-{platform}.sha256.txt`。运行时安装 FFI 组件时，LuaSkills 依赖管理器会根据 `dependencies.yaml` 中的 `version`、`repo` 与平台 `asset_name` 解析同一个 Release 下的对应资产。
 
 Rust FFI 依赖许可证报告由 `cargo-deny` 自动生成：
 
@@ -409,7 +440,7 @@ Rust FFI 依赖许可证报告由 `cargo-deny` 自动生成：
 python .\scripts\generate_cargo_deny_notices.py
 ```
 
-生成结果写入 `THIRD_PARTY_LICENSES.md`，CI 会在 `ast-grep-ffi/` 下通过 `cargo deny check -c deny.toml --exclude-dev licenses` 检查许可证策略，并校验报告是否仍然匹配当前依赖图。
+生成结果写入 `THIRD_PARTY_LICENSES.md`，CI 会在 `codekit-ffi/` 下通过 `cargo deny --config deny.toml --exclude-dev check licenses` 检查 ast-grep 与 Tokei 依赖图的许可证策略，并校验报告是否仍然匹配当前依赖图。
 
 ## 一句话总结
 

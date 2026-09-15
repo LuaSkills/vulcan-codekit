@@ -2,6 +2,11 @@
 
 Use this workflow after `ast-detail` or `rg` has already identified one or more owning functions or methods, and before `vulcan-codekit-patch` replaces any of them as whole nodes.
 
+Path context:
+
+- `PWD` is an optional absolute project or workspace root. VulcanCode hides and injects it when a current project is available.
+- every `nodes[].file` may be relative to `PWD`; without a usable `PWD`, every file must be absolute
+
 Best for:
 
 - reading exact function or method bodies without opening the whole file

@@ -9,12 +9,20 @@ use ast_grep_language::SupportLang;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::fs;
-use std::os::raw::{c_char, c_void};
+use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
-use std::ptr;
+
+use crate::ffi;
+
+/// Match batches returned by ast-grep for one combined scan.
+/// ast-grep 为一次组合扫描返回的命中批次。
+type ScannedMatches<'rule, 'tree> = Vec<(
+    &'rule RuleConfig<SupportLang>,
+    Vec<NodeMatch<'tree, StrDoc<SupportLang>>>,
+)>;
 
 /// Describe one scan request passed from Lua as JSON.
 /// 描述 Lua 以 JSON 传入的一次扫描请求。
@@ -183,12 +191,7 @@ pub extern "C" fn vulcan_codekit_ast_grep_scan_json(request_json: *const c_char)
 /// 释放由 `vulcan_codekit_ast_grep_scan_json` 分配的响应字符串。
 #[no_mangle]
 pub extern "C" fn vulcan_codekit_ast_grep_free_string(value: *mut c_char) {
-    if value.is_null() {
-        return;
-    }
-    unsafe {
-        drop(CString::from_raw(value));
-    }
+    ffi::free_string(value);
 }
 
 /// Decode the C request pointer and execute the scan.
@@ -368,10 +371,7 @@ fn scan_files(
 /// 将 ast-grep 扫描命中追加到输出列表。
 fn append_scan_matches(
     file_path: &str,
-    scanned_matches: Vec<(
-        &RuleConfig<SupportLang>,
-        Vec<NodeMatch<'_, StrDoc<SupportLang>>>,
-    )>,
+    scanned_matches: ScannedMatches<'_, '_>,
     output: &mut Vec<MatchRecord>,
 ) {
     for (rule, node_matches) in scanned_matches {
@@ -513,9 +513,7 @@ fn response_to_c_string(response: ScanResponse) -> *mut c_char {
             )
         }
     };
-    CString::new(json)
-        .map(CString::into_raw)
-        .unwrap_or_else(|_| ptr::null_mut::<c_void>().cast())
+    ffi::string_to_c_pointer(json)
 }
 
 /// Escape text for the fallback JSON encoder.

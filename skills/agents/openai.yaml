@@ -1,4 +1,4 @@
 interface:
   display_name: "Vulcan CodeKit"
-  short_description: "Use codekit tools for repo mapping and safe edits"
-  default_prompt: "Use $vulcan-codekit to map this repository, choose the right files, and make safe codekit-guided edits when needed."
+  short_description: "Map repository scale first, then inspect and edit safely"
+  default_prompt: "Use $vulcan-codekit repo-map first with the host-injected project PWD to understand repository scale, directory distribution, and all-language code statistics; then use project-relative paths to narrow ast-tree or rg to the right directory and make safe codekit-guided edits when needed."

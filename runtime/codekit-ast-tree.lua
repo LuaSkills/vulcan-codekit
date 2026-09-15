@@ -644,7 +644,26 @@ return function(args)
         return render_codekit_error_markdown("CodeKit AST Tree Error", helpers_error)
     end
 
+    -- Shared path contract exported by AST Detail for host-managed PWD resolution.
+    -- AST Detail 为宿主管理 PWD 解析导出的共享路径契约。
+    local path_helpers, path_helpers_error = helpers.load_codekit_path_module()
+    if path_helpers_error then
+        return render_codekit_error_markdown("CodeKit AST Tree Error", path_helpers_error)
+    end
+    -- Validated project root injected by VulcanCode when available.
+    -- VulcanCode 在可用时注入并完成校验的项目根路径。
+    local pwd_root, pwd_error = path_helpers.resolve_pwd_root(args and args.PWD)
+    if pwd_error then
+        return render_codekit_error_markdown("CodeKit AST Tree Error", pwd_error)
+    end
+
     local target_paths, dir_error = validate_dir_argument(args and args.dir)
+    if dir_error then
+        return render_codekit_error_markdown("CodeKit AST Tree Error", dir_error)
+    end
+    -- Single absolute directory path resolved from the public dir argument.
+    -- 从公开 dir 参数解析出的单个绝对目录路径。
+    target_paths, dir_error = path_helpers.resolve_input_paths(target_paths, "dir", pwd_root)
     if dir_error then
         return render_codekit_error_markdown("CodeKit AST Tree Error", dir_error)
     end

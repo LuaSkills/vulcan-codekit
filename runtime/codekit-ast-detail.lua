@@ -57,10 +57,10 @@ local MAX_COMMENT_SUMMARY_BYTES = 100
 local CURRENT_WORKING_DIRECTORY = nil
 local SHARED_LENGTH_HELPERS = nil
 local load_shared_length_helpers
-local AST_GREP_FFI_CLIENT = nil
-local AST_GREP_FFI_CDEF_REGISTERED = false
-local AST_GREP_FFI_DEPENDENCY_NAME = "ast-grep-ffi"
-local AST_GREP_FFI_VERSION = "0.1.7"
+local CODEKIT_FFI_MODULE = nil
+-- Process-local cache of the shared host-managed PWD path module.
+-- 宿主管理 PWD 共享路径模块的进程内缓存。
+local CODEKIT_PATH_MODULE = nil
 local DEFAULT_SOURCE_LANGUAGES = {
     bash = true,
     c = true,
@@ -434,186 +434,136 @@ local function get_entry_file()
 end
 
 --[[
-Return the normalized platform key used by LuaSkills dependency installation.
-返回 LuaSkills 依赖安装使用的标准平台键。
+Load and cache the shared CodeKit PWD path module.
+加载并缓存 CodeKit PWD 共享路径模块。
+
+Returns / 返回值:
+- table|nil: Shared PWD path contract. / 共享 PWD 路径契约。
+- table|nil: Structured loading failure. / 结构化加载失败。
 ]]
-local function current_platform_key()
-    local os_info = vulcan.os.info() or {}
-    local architecture = trim((os_info.arch or os_info.architecture or "")):lower()
-    local os_name = trim((os_info.os or "")):lower()
-
-    if os_name == "windows" then
-        if architecture == "arm64" or architecture == "aarch64" then
-            return "windows-arm64"
-        end
-        return "windows-x64"
+local function load_codekit_path_module()
+    if CODEKIT_PATH_MODULE then
+        return CODEKIT_PATH_MODULE, nil
     end
-
-    if os_name == "macos" or os_name == "darwin" or os_name == "osx" then
-        if architecture == "arm64" or architecture == "aarch64" then
-            return "macos-arm64"
-        end
-        return "macos-x64"
+    -- Exact sibling module path owned by the current skill runtime.
+    -- 当前技能运行时拥有的精确同级模块路径。
+    local module_path = vulcan.path.join(get_entry_dir(), "codekit-path.lua")
+    -- Compiled shared module chunk loaded without mutating package.path.
+    -- 在不修改 package.path 的情况下加载的共享模块代码块。
+    local chunk, load_error = loadfile(module_path)
+    if not chunk then
+        return nil, {
+            error = "codekit_path_module_load_failed",
+            message = tostring(load_error),
+            path = module_path,
+        }
     end
-
-    if architecture == "arm64" or architecture == "aarch64" then
-        return "linux-arm64"
+    -- Executed module result validated as the exact helper table contract.
+    -- 经过精确辅助表契约校验的模块执行结果。
+    local loaded, module_or_error = pcall(chunk)
+    if not loaded or type(module_or_error) ~= "table" then
+        return nil, {
+            error = "codekit_path_module_invalid",
+            message = loaded and "codekit-path.lua did not return a table" or tostring(module_or_error),
+            path = module_path,
+        }
     end
-    return "linux-x64"
+    CODEKIT_PATH_MODULE = module_or_error
+    return CODEKIT_PATH_MODULE, nil
 end
 
 --[[
-Return the host-injected FFI dependency root for the current skill.
-返回宿主为当前 skill 注入的 FFI 依赖根目录。
+Load and cache the shared CodeKit FFI Lua module.
+加载并缓存共享 CodeKit FFI Lua 模块。
 
-返回 / Returns:
-- string: FFI 依赖根目录；未注入时为空字符串。
-  FFI dependency root path, or an empty string when it is not injected.
+Returns / 返回值:
+- table|nil: Shared FFI module contract. / 共享 FFI 模块契约。
+- table|nil: Structured loading failure. / 结构化加载失败。
 ]]
-local function get_ffi_dependency_root()
-    return trim(vulcan and vulcan.deps and vulcan.deps.ffi_path or "")
+local function load_codekit_ffi_module()
+    if CODEKIT_FFI_MODULE then
+        return CODEKIT_FFI_MODULE, nil
+    end
+    -- Resolve the single shared runtime module next to this entry.
+    -- 解析当前入口旁唯一的共享运行时模块。
+    local module_path = vulcan.path.join(get_entry_dir(), "codekit-ffi.lua")
+    -- Load the module without relying on package.path mutation.
+    -- 在不修改 package.path 的情况下加载模块。
+    local chunk, load_error = loadfile(module_path)
+    if not chunk then
+        return nil, {
+            error = "codekit_ffi_module_load_failed",
+            message = tostring(load_error),
+            path = module_path,
+        }
+    end
+    -- Execute the module and validate its exact table contract.
+    -- 执行模块并校验其精确表契约。
+    local loaded, module_or_error = pcall(chunk)
+    if not loaded or type(module_or_error) ~= "table" then
+        return nil, {
+            error = "codekit_ffi_module_invalid",
+            message = loaded and "codekit-ffi.lua did not return a table" or tostring(module_or_error),
+            path = module_path,
+        }
+    end
+    CODEKIT_FFI_MODULE = module_or_error
+    return CODEKIT_FFI_MODULE, nil
 end
 
 --[[
-Resolve the platform-specific ast-grep FFI library filename.
-解析当前平台对应的 ast-grep FFI 动态库文件名。
+Resolve the unified platform-specific dynamic-library filename.
+解析统一的平台相关动态库文件名。
 
-返回 / Returns:
-- string: 当前平台应加载的动态库文件名。
-  Dynamic library filename that should be loaded on the current platform.
+Returns / 返回值:
+- string|nil: Platform-specific library filename, or nil when the shared module cannot load. / 平台相关动态库文件名；共享模块无法加载时返回 nil。
 ]]
 local function get_ast_grep_ffi_library_name()
-    local os_info = vulcan.os.info()
-    if os_info and os_info.os == "windows" then
-        return "vulcan_codekit_ast_grep_ffi.dll"
+    -- Load the shared module that owns library naming.
+    -- 加载拥有动态库命名规则的共享模块。
+    local ffi_module = select(1, load_codekit_ffi_module())
+    if ffi_module and type(ffi_module.get_library_name) == "function" then
+        return ffi_module.get_library_name()
     end
-    if os_info and os_info.os == "macos" then
-        return "libvulcan_codekit_ast_grep_ffi.dylib"
-    end
-    return "libvulcan_codekit_ast_grep_ffi.so"
+    return nil
 end
 
 --[[
-Build possible ast-grep FFI library paths from dependency installation and local development layouts.
-从依赖安装布局和本地开发布局构造可能的 ast-grep FFI 动态库路径。
+Build exact unified dynamic-library candidate paths.
+构造精确的统一动态库候选路径。
 
-参数 / Parameters:
-- library_name(string): 平台动态库文件名 / Platform-specific library filename.
+Parameters / 参数:
+- library_name(string): Platform-specific library filename. / 平台相关动态库文件名。
 
-返回 / Returns:
-- table: 候选动态库绝对路径数组 / Candidate absolute library paths.
+Returns / 返回值:
+- table: Ordered absolute candidate paths. / 有序绝对候选路径。
 ]]
 local function build_ast_grep_ffi_library_candidates(library_name)
-    local candidates = {}
-    local ffi_root = get_ffi_dependency_root()
-    local platform_key = current_platform_key()
-    if ffi_root ~= "" then
-        local dependency_base = vulcan.path.join(
-            ffi_root,
-            AST_GREP_FFI_DEPENDENCY_NAME,
-            AST_GREP_FFI_VERSION,
-            platform_key
-        )
-        table.insert(candidates, vulcan.path.join(vulcan.path.join(dependency_base, "lib"), library_name))
-        table.insert(candidates, vulcan.path.join(vulcan.path.join(dependency_base, "bin"), library_name))
-        table.insert(candidates, vulcan.path.join(dependency_base, library_name))
+    -- Load the shared module that owns dependency path resolution.
+    -- 加载拥有依赖路径解析规则的共享模块。
+    local ffi_module = select(1, load_codekit_ffi_module())
+    if ffi_module and type(ffi_module.build_library_candidates) == "function" then
+        return ffi_module.build_library_candidates(library_name)
     end
-
-    local local_base = vulcan.path.join(get_skill_dir(), "ast-grep-ffi")
-    table.insert(candidates, vulcan.path.join(vulcan.path.join(vulcan.path.join(local_base, "target"), "release"), library_name))
-    table.insert(candidates, vulcan.path.join(vulcan.path.join(vulcan.path.join(local_base, "target"), "debug"), library_name))
-    return candidates
+    return {}
 end
 
 --[[
-Register ast-grep FFI C declarations exactly once for the LuaJIT process.
-为 LuaJIT 进程仅注册一次 ast-grep FFI C 声明。
+Load the unified CodeKit FFI client for existing AST callers.
+为现有 AST 调用方加载统一 CodeKit FFI 客户端。
 
-参数 / Parameters:
-- ffi(table): LuaJIT FFI 模块 / LuaJIT FFI module.
-
-返回 / Returns:
-- boolean: 注册成功时为 true / True when registration succeeds.
-- table|nil: 注册失败时的结构化错误 / Structured error when registration fails.
-]]
-local function register_ast_grep_ffi_cdef(ffi)
-    if AST_GREP_FFI_CDEF_REGISTERED then
-        return true, nil
-    end
-    local ok, cdef_error = pcall(ffi.cdef, [[
-        const char* vulcan_codekit_ast_grep_version(void);
-        char* vulcan_codekit_ast_grep_scan_json(const char* request_json);
-        void vulcan_codekit_ast_grep_free_string(char* value);
-    ]])
-    if not ok then
-        return false, {
-            error = "ast_grep_ffi_cdef_failed",
-            message = tostring(cdef_error),
-        }
-    end
-    AST_GREP_FFI_CDEF_REGISTERED = true
-    return true, nil
-end
-
---[[
-Load the ast-grep FFI dynamic library and cache the resulting client object.
-加载 ast-grep FFI 动态库，并缓存得到的客户端对象。
-
-返回 / Returns:
-- table|nil: FFI 客户端对象 / FFI client object.
-- table|nil: 加载失败时的结构化错误 / Structured error when loading fails.
+Returns / 返回值:
+- table|nil: Validated CodeKit FFI client. / 已校验的 CodeKit FFI 客户端。
+- table|nil: Structured loading failure. / 结构化加载失败。
 ]]
 local function load_ast_grep_ffi_client()
-    if AST_GREP_FFI_CLIENT then
-        return AST_GREP_FFI_CLIENT, nil
+    -- Load the shared Lua module before requesting its dynamic-library client.
+    -- 在请求动态库客户端前加载共享 Lua 模块。
+    local ffi_module, module_error = load_codekit_ffi_module()
+    if not ffi_module then
+        return nil, module_error
     end
-
-    local ffi_ok, ffi = pcall(require, "ffi")
-    if not ffi_ok or type(ffi) ~= "table" then
-        return nil, {
-            error = "luajit_ffi_unavailable",
-            message = "LuaJIT ffi module is required to load ast-grep FFI",
-            details = tostring(ffi),
-        }
-    end
-
-    local cdef_ok, cdef_error = register_ast_grep_ffi_cdef(ffi)
-    if not cdef_ok then
-        return nil, cdef_error
-    end
-
-    local library_name = get_ast_grep_ffi_library_name()
-    local candidates = build_ast_grep_ffi_library_candidates(library_name)
-    local load_errors = {}
-    for _, library_path in ipairs(candidates) do
-        if vulcan.fs.exists(library_path) then
-            local loaded, library_or_error = pcall(ffi.load, library_path)
-            if loaded then
-                local version = ""
-                local version_ok, version_pointer = pcall(library_or_error.vulcan_codekit_ast_grep_version)
-                if version_ok and version_pointer ~= nil then
-                    version = ffi.string(version_pointer)
-                end
-                AST_GREP_FFI_CLIENT = {
-                    kind = "ast_grep_ffi",
-                    ffi = ffi,
-                    library = library_or_error,
-                    library_name = library_name,
-                    library_path = library_path,
-                    version = version,
-                }
-                return AST_GREP_FFI_CLIENT, nil
-            end
-            table.insert(load_errors, tostring(library_or_error))
-        end
-    end
-
-    return nil, {
-        error = "ast_grep_ffi_library_not_found",
-        message = "ast-grep FFI library was not found in the current skill dependency root",
-        expected_paths = candidates,
-        load_errors = load_errors,
-    }
+    return ffi_module.load_client()
 end
 
 --[[
@@ -796,50 +746,13 @@ Call the ast-grep FFI scanner and decode its JSON response.
 - table: 诊断信息数组 / Diagnostic messages.
 ]]
 local function call_ast_grep_ffi(scanner_client, request)
-    if type(scanner_client) ~= "table" or scanner_client.kind ~= "ast_grep_ffi" then
-        return nil, { "ast_grep_ffi_client_missing" }
+    -- Load the exact shared module that owns JSON invocation and response release.
+    -- 加载拥有 JSON 调用与响应释放规则的精确共享模块。
+    local ffi_module, module_error = load_codekit_ffi_module()
+    if not ffi_module then
+        return nil, { tostring(module_error and module_error.error) .. ": " .. tostring(module_error and module_error.message) }
     end
-
-    local encoded_ok, encoded_request = pcall(vulcan.json.encode, request)
-    if not encoded_ok or type(encoded_request) ~= "string" then
-        return nil, { "ast_grep_ffi_request_encode_failed: " .. tostring(encoded_request) }
-    end
-
-    local ffi = scanner_client.ffi
-    local library = scanner_client.library
-    local scan_ok, response_pointer = pcall(library.vulcan_codekit_ast_grep_scan_json, encoded_request)
-    if not scan_ok then
-        return nil, { "ast_grep_ffi_scan_failed: " .. tostring(response_pointer) }
-    end
-    if response_pointer == nil then
-        return nil, { "ast_grep_ffi_scan_returned_null" }
-    end
-
-    local response_ok, response_text = pcall(ffi.string, response_pointer)
-    pcall(library.vulcan_codekit_ast_grep_free_string, response_pointer)
-    if not response_ok then
-        return nil, { "ast_grep_ffi_response_read_failed: " .. tostring(response_text) }
-    end
-
-    local decoded, decode_error = vulcan.json.decode(response_text)
-    if not decoded or type(decoded) ~= "table" then
-        return nil, { "ast_grep_ffi_response_decode_failed: " .. tostring(decode_error) }
-    end
-
-    local diagnostics = {}
-    for _, diagnostic in ipairs(decoded.diagnostics or {}) do
-        table.insert(diagnostics, tostring(diagnostic))
-    end
-    if decoded.ok ~= true then
-        local message = tostring(decoded.error or "ast_grep_ffi_error")
-        if decoded.message and tostring(decoded.message) ~= "" then
-            message = message .. ": " .. tostring(decoded.message)
-        end
-        table.insert(diagnostics, message)
-        return nil, diagnostics
-    end
-
-    return decoded.matches or {}, diagnostics
+    return ffi_module.call_ast_grep(scanner_client, request)
 end
 
 --[[
@@ -2325,6 +2238,7 @@ end
 -- 显式导出 AST Tree 所需的辅助函数边界，避免依赖嵌套闭包的 upvalue 探测。
 local function expose_ast_tree_runtime_helpers()
     return {
+        load_codekit_path_module = load_codekit_path_module,
         classify_target_path_modes = classify_target_path_modes,
         find_binary = find_binary,
         collect_files = collect_files,
@@ -2359,7 +2273,26 @@ return function(args)
         end
     end
 
+    -- Shared path contract used to consume the host-managed PWD argument.
+    -- 用于消费宿主管理 PWD 参数的共享路径契约。
+    local path_helpers, path_helpers_error = load_codekit_path_module()
+    if path_helpers_error then
+        return render_codekit_error_markdown("CodeKit AST Detail Error", path_helpers_error)
+    end
+    -- Validated project root injected by VulcanCode when one is available.
+    -- VulcanCode 在项目根可用时注入并完成校验的项目根路径。
+    local pwd_root, pwd_error = path_helpers.resolve_pwd_root(args and args.PWD)
+    if pwd_error then
+        return render_codekit_error_markdown("CodeKit AST Detail Error", pwd_error)
+    end
+
     local target_paths, path_error = validate_detail_paths_argument(args and args.paths)
+    if path_error then
+        return render_codekit_error_markdown("CodeKit AST Detail Error", path_error)
+    end
+    -- Absolute file paths resolved from every newline-separated public path.
+    -- 从每个换行分隔公开路径解析出的绝对文件路径。
+    target_paths, path_error = path_helpers.resolve_input_paths(target_paths, "paths", pwd_root)
     if path_error then
         return render_codekit_error_markdown("CodeKit AST Detail Error", path_error)
     end

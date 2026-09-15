@@ -59,7 +59,9 @@ permissions:
 
 concurrency:
   group: codekit-release-${{ github.workflow }}-${{ github.event.inputs.version || github.ref_name }}
-  cancel-in-progress: true
+  # Never cancel an in-flight immutable-tag build, because cancellation can leave release assets incomplete.
+  # 绝不取消正在执行的不可变标签构建，避免发布资产处于不完整状态。
+  cancel-in-progress: false
 
 jobs:
   prepare-release:
@@ -75,6 +77,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build release plan from inputs
         id: prepare
@@ -113,12 +117,55 @@ jobs:
               [string]$Path
             )
 
-            $match = Select-String -Path $Path -Pattern '^\s*version:\s*["'']?([^"''\s#]+)["'']?\s*(?:#.*)?$' | Select-Object -First 1
-            if ($null -eq $match) {
+            $text = [System.IO.File]::ReadAllText($Path)
+            $match = [regex]::Match($text, '(?m)^version:\s*([^\s#]+)')
+            if (-not $match.Success) {
               throw "skill.yaml must declare one top-level version field"
             }
 
-            return $match.Matches[0].Groups[1].Value.Trim()
+            return $match.Groups[1].Value.Trim().Trim([char]0x22, [char]0x27)
+          }
+
+          # Read-CargoPackageVersion reads the first package version from the unified FFI manifest.
+          # Read-CargoPackageVersion 从统一 FFI 清单读取第一个 package 版本。
+          function Read-CargoPackageVersion {
+            param(
+              [string]$Path
+            )
+
+            $text = [System.IO.File]::ReadAllText($Path)
+            $match = [regex]::Match($text, '(?m)^\s*version\s*=\s*([^\s#]+)')
+            if (-not $match.Success) {
+              throw "$Path must declare one package version field"
+            }
+
+            return $match.Groups[1].Value.Trim().Trim([char]0x22, [char]0x27)
+          }
+
+          # Read-CodeKitFfiDependencyVersion reads the exact codekit-ffi version from dependencies.yaml.
+          # Read-CodeKitFfiDependencyVersion 从 dependencies.yaml 读取精确的 codekit-ffi 版本。
+          function Read-CodeKitFfiDependencyVersion {
+            param(
+              [string]$Path
+            )
+
+            $lines = Get-Content -Path $Path
+            $insideCodeKitFfi = $false
+            foreach ($line in $lines) {
+              if ($line -match '^\s*-\s+name:\s*codekit-ffi\s*$') {
+                $insideCodeKitFfi = $true
+                continue
+              }
+              $versionMatch = [regex]::Match($line, '^\s+version:\s*([^\s#]+)')
+              if ($insideCodeKitFfi -and $versionMatch.Success) {
+                return $versionMatch.Groups[1].Value.Trim().Trim([char]0x22, [char]0x27)
+              }
+              if ($insideCodeKitFfi -and $line -match '^\s*-\s+name:') {
+                break
+              }
+            }
+
+            throw "dependencies.yaml must declare one codekit-ffi version"
           }
 
           # Add-FfiTarget appends one enabled platform entry and keeps disabled platforms out of the matrix.
@@ -144,24 +191,56 @@ jobs:
             })
           }
 
-          $skillVersion = Read-SkillVersion -Path "skill.yaml"
-          $manifestTag = "v$skillVersion"
+          # Resolve the requested immutable tag before reading any release manifest content.
+          # 在读取任何发布清单内容前解析请求的不可变标签。
           $versionInput = Normalize-Runner -Runner $env:INPUT_VERSION -Default ""
-          if ([string]::IsNullOrWhiteSpace($versionInput)) {
-            if ($env:INPUT_REF_TYPE -eq "tag" -and -not [string]::IsNullOrWhiteSpace($env:INPUT_REF_NAME)) {
-              $version = $env:INPUT_REF_NAME.Trim()
-            } else {
-              $version = $manifestTag
-            }
-          } else {
+          if (-not [string]::IsNullOrWhiteSpace($versionInput)) {
             $version = $versionInput
+          } elseif ($env:INPUT_REF_TYPE -eq "tag" -and -not [string]::IsNullOrWhiteSpace($env:INPUT_REF_NAME)) {
+            $version = $env:INPUT_REF_NAME.Trim()
+          } else {
+            $dispatchSkillVersion = Read-SkillVersion -Path "skill.yaml"
+            $version = "v$dispatchSkillVersion"
           }
 
           if (-not $version.StartsWith("v")) {
             $version = "v$version"
           }
+
+          # Resolve only an existing reviewed tag so manual rebuilds cannot publish an untagged branch snapshot.
+          # 仅解析已存在且经过审核的标签，避免手动重建发布未打标的分支快照。
+          git rev-parse --quiet --verify "refs/tags/$version^{commit}" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "release tag $version does not exist in the checked-out repository"
+          }
+          # Switch the preparation workspace to the exact tag before deriving versions or build metadata.
+          # 在派生版本或构建元数据前，将准备工作区切换到精确标签。
+          git checkout --detach "refs/tags/$version"
+          if ($LASTEXITCODE -ne 0) {
+            throw "failed to check out release tag $version"
+          }
+
+          # Validate every release version from the exact tagged source, including manual rebuilds.
+          # 从精确标签源码校验每个发布版本，同时覆盖手动重建场景。
+          $skillVersion = Read-SkillVersion -Path "skill.yaml"
+          $ffiVersion = Read-CargoPackageVersion -Path "codekit-ffi/Cargo.toml"
+          $dependencyVersion = Read-CodeKitFfiDependencyVersion -Path "dependencies.yaml"
+          if ($ffiVersion -ne $skillVersion) {
+            throw "codekit-ffi version $ffiVersion must match skill.yaml version $skillVersion"
+          }
+          if ($dependencyVersion -ne $skillVersion) {
+            throw "codekit-ffi dependency version $dependencyVersion must match skill.yaml version $skillVersion"
+          }
+          $manifestTag = "v$skillVersion"
           if ($version -ne $manifestTag) {
-            throw "release version $version must match skill.yaml version $manifestTag"
+            throw "release version $version must match tagged skill.yaml version $manifestTag"
+          }
+
+          # Require every joint release to include the previously committed RG baseline.
+          # 要求每个联合版本都包含此前已提交的 RG 基线。
+          git merge-base --is-ancestor 9227ab2ce5efb2381b4df26a347b897d7ee171fe "refs/tags/$version^{commit}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "release tag $version must contain RG baseline commit 9227ab2"
           }
 
           $luaskillRunner = Normalize-Runner -Runner $env:INPUT_LUASKILL_RUNNER -Default "ubuntu-latest"
@@ -170,11 +249,11 @@ jobs:
           # Targets stores only the FFI platforms explicitly left enabled for this release run.
           # Targets 仅保存本次发布明确启用的 FFI 平台。
           $targets = [System.Collections.Generic.List[object]]::new()
-          Add-FfiTarget -Targets $targets -Platform "linux-x64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_X64_RUNNER -Default "ubuntu-latest") -RustTarget "x86_64-unknown-linux-gnu" -LibraryPath "target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so"
-          Add-FfiTarget -Targets $targets -Platform "linux-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_ARM64_RUNNER -Default "ubuntu-24.04-arm") -RustTarget "aarch64-unknown-linux-gnu" -LibraryPath "target/aarch64-unknown-linux-gnu/release/libvulcan_codekit_ast_grep_ffi.so"
-          Add-FfiTarget -Targets $targets -Platform "macos-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_ARM64_RUNNER -Default "macos-15") -RustTarget "aarch64-apple-darwin" -LibraryPath "target/aarch64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib"
-          Add-FfiTarget -Targets $targets -Platform "macos-x64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_X64_RUNNER -Default "macos-15-intel") -RustTarget "x86_64-apple-darwin" -LibraryPath "target/x86_64-apple-darwin/release/libvulcan_codekit_ast_grep_ffi.dylib"
-          Add-FfiTarget -Targets $targets -Platform "windows-x64" -Runner (Normalize-Runner -Runner $env:INPUT_WINDOWS_X64_RUNNER -Default "windows-latest") -RustTarget "x86_64-pc-windows-msvc" -LibraryPath "target/x86_64-pc-windows-msvc/release/vulcan_codekit_ast_grep_ffi.dll"
+          Add-FfiTarget -Targets $targets -Platform "linux-x64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_X64_RUNNER -Default "ubuntu-latest") -RustTarget "x86_64-unknown-linux-gnu" -LibraryPath "target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so"
+          Add-FfiTarget -Targets $targets -Platform "linux-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_ARM64_RUNNER -Default "ubuntu-24.04-arm") -RustTarget "aarch64-unknown-linux-gnu" -LibraryPath "target/aarch64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so"
+          Add-FfiTarget -Targets $targets -Platform "macos-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_ARM64_RUNNER -Default "macos-15") -RustTarget "aarch64-apple-darwin" -LibraryPath "target/aarch64-apple-darwin/release/libvulcan_codekit_ffi.dylib"
+          Add-FfiTarget -Targets $targets -Platform "macos-x64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_X64_RUNNER -Default "macos-15-intel") -RustTarget "x86_64-apple-darwin" -LibraryPath "target/x86_64-apple-darwin/release/libvulcan_codekit_ffi.dylib"
+          Add-FfiTarget -Targets $targets -Platform "windows-x64" -Runner (Normalize-Runner -Runner $env:INPUT_WINDOWS_X64_RUNNER -Default "windows-latest") -RustTarget "x86_64-pc-windows-msvc" -LibraryPath "target/x86_64-pc-windows-msvc/release/vulcan_codekit_ffi.dll"
 
           $matrixJson = @{ include = @($targets) } | ConvertTo-Json -Compress -Depth 5
           $hasFfiTargets = if ($targets.Count -gt 0) { "true" } else { "false" }
@@ -198,30 +277,47 @@ jobs:
         run: |
           echo "LuaSkill packaging is off and all FFI runners are off. Nothing to publish."
 
-  create-release:
-    name: Ensure GitHub Release
+  validate-release:
+    name: Validate Release Candidate
     needs: prepare-release
     if: needs.prepare-release.outputs.has_work == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Create or update release
-        uses: softprops/action-gh-release@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          tag_name: ${{ needs.prepare-release.outputs.version }}
-          name: Vulcan CodeKit ${{ needs.prepare-release.outputs.version }}
-          body: |
-            Vulcan CodeKit LuaSkill release ${{ needs.prepare-release.outputs.version }}.
+          ref: ${{ needs.prepare-release.outputs.version }}
 
-            - Skill package assets follow the managed LuaSkill GitHub release naming rules.
-            - ast-grep FFI assets are installed by dependencies.yaml from this same release.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install validation dependencies
+        run: |
+          python -m pip install --upgrade pip pyyaml
+          cargo install cargo-deny --locked --version 0.19.4
+
+      - name: Validate manifests and generated license report
+        run: |
+          python ./scripts/validate_skill.py
+          python ./scripts/generate_cargo_deny_notices.py --check
+
+      - name: Validate unified CodeKit FFI
+        run: |
+          cargo fmt --manifest-path codekit-ffi/Cargo.toml --check
+          cargo clippy --manifest-path codekit-ffi/Cargo.toml --all-targets --locked -- -D warnings
+          cargo test --manifest-path codekit-ffi/Cargo.toml --locked
+          cargo deny --manifest-path codekit-ffi/Cargo.toml --config codekit-ffi/deny.toml --exclude-dev check licenses
 
   build-luaskill:
     name: Build LuaSkill Package
     needs:
       - prepare-release
-      - create-release
+      - validate-release
     if: needs.prepare-release.outputs.build_luaskill == 'true'
     runs-on: >-
       ${{
@@ -232,6 +328,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.version }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -247,20 +345,19 @@ jobs:
       - name: Build skill package
         run: python ./scripts/package_skill.py
 
-      - name: Upload LuaSkill release assets
-        uses: softprops/action-gh-release@v2
+      - name: Stage LuaSkill release assets
+        uses: actions/upload-artifact@v4
         with:
-          files: dist/*
-          tag_name: ${{ needs.prepare-release.outputs.version }}
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: release-luaskill
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
 
   build-ffi:
     name: Build FFI ${{ matrix.platform }}
     needs:
       - prepare-release
-      - create-release
+      - validate-release
     if: needs.prepare-release.outputs.has_ffi_targets == 'true'
     runs-on: >-
       ${{
@@ -274,6 +371,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.version }}
 
       - name: Set up Rust (Unix)
         if: runner.os != 'Windows'
@@ -307,17 +406,57 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build ast-grep FFI
-        run: cargo build --manifest-path ast-grep-ffi/Cargo.toml --release --target ${{ matrix.rust_target }} --target-dir target
+      - name: Build unified CodeKit FFI
+        run: cargo build --manifest-path codekit-ffi/Cargo.toml --release --locked --target ${{ matrix.rust_target }} --target-dir target
 
-      - name: Package ast-grep FFI
+      - name: Execute unified CodeKit FFI public ABI smoke
+        run: python ./scripts/smoke_ffi.py --library-path ${{ matrix.library_path }} --repo-root .
+
+      - name: Package unified CodeKit FFI
         run: python ./scripts/package_ffi.py --platform ${{ matrix.platform }} --library-path ${{ matrix.library_path }}
 
-      - name: Upload FFI release assets
+      - name: Stage FFI release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ffi-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-release:
+    name: Publish Complete GitHub Release
+    needs:
+      - prepare-release
+      - validate-release
+      - build-luaskill
+      - build-ffi
+    if: >-
+      always() &&
+      needs.prepare-release.outputs.has_work == 'true' &&
+      needs.validate-release.result == 'success' &&
+      (needs.build-luaskill.result == 'success' || needs.build-luaskill.result == 'skipped') &&
+      (needs.build-ffi.result == 'success' || needs.build-ffi.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download complete release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update complete release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: release-assets/*
           tag_name: ${{ needs.prepare-release.outputs.version }}
+          name: Vulcan CodeKit ${{ needs.prepare-release.outputs.version }}
           fail_on_unmatched_files: true
+          body: |
+            Vulcan CodeKit LuaSkill release ${{ needs.prepare-release.outputs.version }}.
+
+            - Skill package assets follow the managed LuaSkill GitHub release naming rules.
+            - This joint release includes the previously committed RG scale/diagnostic improvements and the new repository-first Repo Map workflow.
+            - Unified codekit-ffi assets provide compatible ast-grep scanning plus Tokei-powered repository statistics and are installed by dependencies.yaml from this same release.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
