@@ -6,7 +6,7 @@ Vulcan CodeKit 原生能力的统一 LuaJIT FFI 加载器。
 -- Expected dependency identity and semantic version.
 -- 预期的依赖身份与语义化版本。
 local CODEKIT_FFI_DEPENDENCY_NAME = "codekit-ffi"
-local CODEKIT_FFI_VERSION = "0.2.0"
+local CODEKIT_FFI_VERSION = "0.2.1"
 -- Process-local module state for idempotent cdef and dynamic-library loading.
 -- 进程内模块状态，用于幂等注册 cdef 与加载动态库。
 local CODEKIT_FFI_CDEF_REGISTERED = false

@@ -398,7 +398,7 @@ This repository is no longer maintained as a demo skill. It is the release sourc
 
 The current implementation calls neither the raw `ast-grep` CLI nor a `tokei` executable. Both capabilities are Rust library dependencies inside the dynamic library built from `codekit-ffi/`. The Lua runtime loads the platform-specific dynamic library from the FFI dependency directory injected by LuaSkills. During local development, it also checks the exact `codekit-ffi/target/release` and `codekit-ffi/target/debug` paths.
 
-Version `0.2.0` replaces the former skill-private dependency identity `ast-grep-ffi` with `codekit-ffi`. Current LuaSkills update handling installs the new manifest dependency first and removes skill-private dependency roots that are no longer present after a successful update. The CodeKit loader never probes the retired library name, so an inert old directory left by an older host cannot be selected accidentally.
+Version `0.2.1` replaces the former skill-private dependency identity `ast-grep-ffi` with `codekit-ffi`. Current LuaSkills update handling installs the new manifest dependency first and removes skill-private dependency roots that are no longer present after a successful update. The CodeKit loader never probes the retired library name, so an inert old directory left by an older host cannot be selected accidentally.
 
 The current release workflow builds and publishes FFI components only for these platforms:
 

@@ -47,7 +47,7 @@ lua_dependencies: []
 
 ffi_dependencies:
   - name: codekit-ffi
-    version: "0.2.0"
+    version: "0.2.1"
     required: true
     scope: skill
     source:

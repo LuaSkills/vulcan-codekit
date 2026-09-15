@@ -397,7 +397,7 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 当前既不调用原始 `ast-grep` CLI，也不调用外部 `tokei` 可执行文件；两项能力都以 Rust 库依赖集成在 `codekit-ffi/` 构建出的统一动态库中。Lua 运行时代码会从 LuaSkills 注入的 FFI 依赖目录加载对应平台的动态库；本地开发时只检查精确的 `codekit-ffi/target/release` 与 `codekit-ffi/target/debug` 路径。
 
-`0.2.0` 会把原有 skill 私有依赖身份 `ast-grep-ffi` 替换为 `codekit-ffi`。当前 LuaSkills 更新流程会先安装新清单依赖，并在更新成功后清理新清单中已经不存在的旧 skill 私有依赖根目录。CodeKit 加载器不会探测退役动态库名称，因此旧版宿主即使遗留了不再使用的目录，也不会被误加载。
+`0.2.1` 会把原有 skill 私有依赖身份 `ast-grep-ffi` 替换为 `codekit-ffi`。当前 LuaSkills 更新流程会先安装新清单依赖，并在更新成功后清理新清单中已经不存在的旧 skill 私有依赖根目录。CodeKit 加载器不会探测退役动态库名称，因此旧版宿主即使遗留了不再使用的目录，也不会被误加载。
 
 当前 release workflow 只构建并发布以下平台的 FFI 组件：
 

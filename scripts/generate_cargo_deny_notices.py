@@ -19,7 +19,7 @@ DEFAULT_OUTPUT_PATH = Path("THIRD_PARTY_LICENSES.md")
 
 # Cargo-deny version used by CI and expected by local generation.
 # CI 与本地生成流程使用的 cargo-deny 版本。
-CARGO_DENY_VERSION = "0.19.4"
+CARGO_DENY_VERSION = "0.20.2"
 
 
 @dataclass(frozen=True)

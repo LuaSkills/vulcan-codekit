@@ -20,7 +20,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked --version 0.19.4
+        run: cargo install cargo-deny --locked --version 0.20.2
 
       - name: Install validation dependencies
         run: python -m pip install --upgrade pip pyyaml
