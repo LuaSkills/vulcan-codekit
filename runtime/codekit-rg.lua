@@ -7,6 +7,15 @@ Perform ripgrep text matching first, then reuse codekit-ast-detail structural an
 -- 工具常量 / Tool constants for rg execution and response shaping.
 local RG_TIMEOUT_MS = 30000
 local MAX_MATCH_LINES_PER_SYMBOL = 12
+-- Maximum size of one file admitted to synchronous AST enrichment.
+-- 单个文件进入同步 AST 增强阶段时允许的最大字节数。
+local MAX_AST_ENRICHMENT_FILE_BYTES = 2 * 1024 * 1024
+-- Maximum aggregate size admitted to synchronous AST enrichment for one RG call.
+-- 单次 RG 调用进入同步 AST 增强阶段时允许的文件总字节数上限。
+local MAX_AST_ENRICHMENT_TOTAL_BYTES = 8 * 1024 * 1024
+-- Maximum number of files admitted to synchronous AST enrichment for one RG call.
+-- 单次 RG 调用进入同步 AST 增强阶段时允许的文件数量上限。
+local MAX_AST_ENRICHMENT_FILES = 100
 local LFS_MODULE = nil
 local SHARED_LENGTH_HELPERS = nil
 
@@ -32,6 +41,34 @@ local function split_lines(content)
         table.insert(lines, line)
     end
     return lines
+end
+
+--[[
+Emit one low-frequency runtime diagnostic at a stable CodeKit RG stage boundary.
+在稳定的 CodeKit RG 阶段边界发送一条低频运行时诊断。
+
+Parameters / 参数:
+- stage(string): Stable stage identifier.
+  稳定的阶段标识。
+- status(string): Stage state such as started or completed.
+  started 或 completed 等阶段状态。
+- details(string|nil): Non-sensitive counts or reason fields.
+  非敏感的计数或原因字段。
+
+Returns / 返回:
+- nil: Diagnostic failures never change tool semantics.
+  诊断失败绝不改变工具语义。
+]]
+local function log_rg_stage(stage, status, details)
+    -- Stable diagnostic payload that excludes search expressions and source text.
+    -- 不包含搜索表达式和源码文本的稳定诊断载荷。
+    local message = string.format(
+        "tool=vulcan_codekit_rg stage=%s status=%s%s",
+        tostring(stage),
+        tostring(status),
+        details and (" " .. tostring(details)) or ""
+    )
+    pcall(vulcan.runtime.log, "info", message)
 end
 
 --[[
@@ -1067,6 +1104,136 @@ local function build_filtered_file_content(symbol_roots)
 end
 
 --[[
+Partition exact RG-matched files into bounded AST-enrichment and direct-hit groups.
+将 RG 精确命中的文件划分为有界 AST 增强组和直接命中回退组。
+
+Parameters / 参数:
+- files(table): Exact file descriptors returned by the shared collector.
+  共享文件收集器返回的精确文件描述对象。
+
+Returns / 返回:
+- table: Files admitted to synchronous AST enrichment.
+  允许进入同步 AST 增强阶段的文件。
+- table: Files skipped from AST enrichment together with explicit reasons.
+  跳过 AST 增强并携带明确原因的文件。
+- table: User-visible diagnostics for every skipped file.
+  每个被跳过文件对应的用户可见诊断。
+- number: Aggregate bytes admitted to synchronous AST enrichment.
+  允许进入同步 AST 增强阶段的累计字节数。
+]]
+local function partition_ast_enrichment_files(files)
+    -- Files whose exact metadata stays within every enrichment boundary.
+    -- 精确元数据同时满足全部增强边界的文件。
+    local admitted_files = {}
+    -- Files rendered from direct RG hits because AST enrichment is unsafe or too expensive.
+    -- 因 AST 增强不安全或代价过高而直接渲染 RG 命中的文件。
+    local skipped_files = {}
+    -- Stable diagnostics explaining every degradation from AST enrichment to direct RG output.
+    -- 解释每次从 AST 增强降级为直接 RG 输出的稳定诊断。
+    local diagnostics = {}
+    -- Aggregate byte size already admitted to the synchronous FFI boundary.
+    -- 已进入同步 FFI 边界的累计文件字节数。
+    local admitted_bytes = 0
+
+    for _, file_info in ipairs(files or {}) do
+        -- Exact filesystem metadata for the already-resolved file path.
+        -- 已解析精确文件路径对应的文件系统元数据。
+        local stat_ok, metadata_or_error = pcall(vulcan.fs.stat, file_info.path)
+        -- Stable reason code used by both fallback rendering and diagnostics.
+        -- 回退渲染和诊断共同使用的稳定原因码。
+        local skip_reason = nil
+        -- Exact file size retained for diagnostics when metadata is available.
+        -- 元数据可用时为诊断保留的精确文件大小。
+        local file_size = nil
+
+        if not stat_ok then
+            skip_reason = "file_stat_failed"
+        elseif type(metadata_or_error) ~= "table" or metadata_or_error.is_file ~= true then
+            skip_reason = "file_stat_unavailable"
+        elseif type(metadata_or_error.size) ~= "number" then
+            skip_reason = "file_size_unavailable"
+        else
+            file_size = metadata_or_error.size
+            if file_size > MAX_AST_ENRICHMENT_FILE_BYTES then
+                skip_reason = "file_size_limit_exceeded"
+            elseif #admitted_files >= MAX_AST_ENRICHMENT_FILES then
+                skip_reason = "file_count_limit_exceeded"
+            elseif admitted_bytes + file_size > MAX_AST_ENRICHMENT_TOTAL_BYTES then
+                skip_reason = "total_size_limit_exceeded"
+            end
+        end
+
+        if skip_reason then
+            table.insert(skipped_files, {
+                file_info = file_info,
+                reason = skip_reason,
+                size = file_size,
+            })
+            table.insert(
+                diagnostics,
+                string.format(
+                    "%s: path=%s size=%s per_file_limit=%d total_limit=%d file_limit=%d",
+                    skip_reason,
+                    tostring(file_info.display_file or file_info.path),
+                    file_size and tostring(file_size) or "unknown",
+                    MAX_AST_ENRICHMENT_FILE_BYTES,
+                    MAX_AST_ENRICHMENT_TOTAL_BYTES,
+                    MAX_AST_ENRICHMENT_FILES
+                )
+            )
+        else
+            table.insert(admitted_files, file_info)
+            admitted_bytes = admitted_bytes + file_size
+        end
+    end
+
+    return admitted_files, skipped_files, diagnostics, admitted_bytes
+end
+
+--[[
+Render direct RG hits for files deliberately excluded from AST enrichment.
+为主动排除在 AST 增强之外的文件渲染直接 RG 命中。
+
+Parameters / 参数:
+- skipped_files(table): Skipped file descriptors and their explicit reason codes.
+  被跳过的文件描述对象及其明确原因码。
+- hits_by_canonical_file(table): RG hits keyed by canonical exact file path.
+  以规范化精确文件路径为键的 RG 命中。
+
+Returns / 返回:
+- table: File results preserving useful RG output without invoking the AST FFI.
+  不调用 AST FFI 但仍保留有效 RG 输出的文件结果。
+]]
+local function build_direct_rg_file_results(skipped_files, hits_by_canonical_file)
+    -- Direct-hit file results merged with regular AST-enriched results later.
+    -- 稍后与常规 AST 增强结果合并的直接命中文件结果。
+    local file_results = {}
+
+    for _, skipped in ipairs(skipped_files or {}) do
+        -- Exact file descriptor captured before the enrichment boundary decision.
+        -- 在增强边界判定前捕获的精确文件描述对象。
+        local file_info = skipped.file_info
+        -- Ordered RG hits retained for this exact canonical file.
+        -- 为该精确规范文件保留的有序 RG 命中。
+        local file_hits = hits_by_canonical_file[normalize_path_key(file_info.path)] or {}
+        -- Direct output lines headed by an explicit degradation marker.
+        -- 以明确降级标记开头的直接输出行。
+        local content_lines = {
+            string.format("@ AST enrichment skipped: %s", tostring(skipped.reason)),
+        }
+        for _, hit in ipairs(file_hits) do
+            table.insert(content_lines, format_match_label(hit))
+        end
+        table.insert(file_results, {
+            file = file_info.display_file or file_info.path,
+            content = table.concat(content_lines, "\n"),
+        })
+    end
+
+    return file_results
+end
+
+--[[
 根据预先收集的文件上下文统一生成 rg 文件结果，固定只输出命中结构与命中行，保持结果协议单一稳定。
 Build rg file results from pre-collected file contexts and always emit only matched structures plus matched lines so the response protocol stays single and stable.
 
@@ -1208,6 +1375,7 @@ end
 
 -- 工具入口 / Tool entry point invoked by the MCP runtime.
 return function(args)
+    log_rg_stage("invocation", "started", nil)
     local _, client_limit_error = initialize_rg_client_budget()
     if client_limit_error then
         return render_codekit_error_markdown("CodeKit RG Error", client_limit_error)
@@ -1254,10 +1422,13 @@ return function(args)
     end
 
     local rg_arguments = build_rg_arguments(target_directory, extension_filter, rg_pattern, ignore_enabled, regex_engine)
+    log_rg_stage("rg_process", "started", nil)
     local rg_stdout, rg_stderr, rg_error = run_rg_command(rg_binary_path, rg_arguments)
     if rg_error then
+        log_rg_stage("rg_process", "failed", "reason=" .. tostring(rg_error.error or "unknown"))
         return render_codekit_error_markdown("CodeKit RG Error", rg_error)
     end
+    log_rg_stage("rg_process", "completed", "stdout_bytes=" .. tostring(#rg_stdout))
 
     local hits_by_file, diagnostics = parse_rg_json_output(rg_stdout, rg_stderr)
     local matched_file_paths = {}
@@ -1271,6 +1442,7 @@ return function(args)
         end
     end
     table.sort(matched_file_paths)
+    log_rg_stage("rg_parse", "completed", "matched_files=" .. tostring(#matched_file_paths))
 
     if #matched_file_paths == 0 then
         return finalize_rg_result({
@@ -1293,16 +1465,50 @@ return function(args)
         })
     end
 
+    local enrichment_files, skipped_enrichment_files, enrichment_diagnostics, enrichment_bytes =
+        partition_ast_enrichment_files(files)
+    log_rg_stage(
+        "ast_plan",
+        "completed",
+        string.format(
+            "admitted_files=%d skipped_files=%d admitted_bytes=%d",
+            #enrichment_files,
+            #skipped_enrichment_files,
+            enrichment_bytes
+        )
+    )
     local grouped_files = {}
     local aggregated_errors = clone_array(collection_errors or {})
-    for _, file_info in ipairs(files or {}) do
+    if #enrichment_diagnostics > 0 then
+        table.insert(aggregated_errors, {
+            group = "ast_enrichment_skipped",
+            diagnostics = enrichment_diagnostics,
+        })
+    end
+    for _, file_info in ipairs(enrichment_files) do
         grouped_files[file_info.language] = grouped_files[file_info.language] or {}
         table.insert(grouped_files[file_info.language], file_info.path)
     end
 
     local normalized_by_file = {}
     for language_key, file_paths in pairs(grouped_files) do
+        log_rg_stage(
+            "ast_scan",
+            "started",
+            string.format("language=%s files=%d", tostring(language_key), #file_paths)
+        )
         local matches, match_diagnostics = helper_bundle.run_language_scan(scanner_client, nil, language_key, file_paths)
+        log_rg_stage(
+            "ast_scan",
+            "completed",
+            string.format(
+                "language=%s files=%d matches=%d diagnostics=%d",
+                tostring(language_key),
+                #file_paths,
+                #(matches or {}),
+                #(match_diagnostics or {})
+            )
+        )
         if match_diagnostics and #match_diagnostics > 0 then
             table.insert(aggregated_errors, { group = language_key, diagnostics = match_diagnostics })
         end
@@ -1316,7 +1522,7 @@ return function(args)
     end
 
     local render_contexts = {}
-    for _, file_info in ipairs(files or {}) do
+    for _, file_info in ipairs(enrichment_files) do
         local file_hits = hits_by_canonical_file[normalize_path_key(file_info.path)] or {}
         local symbols = helper_bundle.deduplicate_symbols(normalized_by_file[file_info.path] or {})
         table.insert(render_contexts, {
@@ -1327,6 +1533,17 @@ return function(args)
     end
 
     local file_results = build_rg_file_results(render_contexts, helper_bundle)
+    for _, direct_result in ipairs(build_direct_rg_file_results(skipped_enrichment_files, hits_by_canonical_file)) do
+        table.insert(file_results, direct_result)
+    end
+    table.sort(file_results, function(left, right)
+        return left.file < right.file
+    end)
+    log_rg_stage(
+        "render",
+        "completed",
+        string.format("result_files=%d diagnostics=%d", #file_results, #aggregated_errors)
+    )
 
     return finalize_rg_result({
         files = file_results,

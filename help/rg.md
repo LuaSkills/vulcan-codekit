@@ -23,3 +23,7 @@ Typical route:
 3. Use the returned owner context to decide whether `ast-detail` is needed next.
 
 Output focuses on matching lines and their owning structure. It does not export Markdown to a caller-provided path; `export_md_path` is unsupported.
+
+AST enrichment is deliberately bounded because `rg` can match generated bundles and dependency trees that are fast to search but expensive to parse synchronously. A single file larger than 2 MiB, aggregate admitted input larger than 8 MiB, or matches beyond the first 100 admitted files skip AST enrichment. Their direct RG lines remain in the result together with an `ast_enrichment_skipped` diagnostic.
+
+The runtime emits low-frequency `vulcan_codekit_rg` stage diagnostics for `rg_process`, `rg_parse`, `ast_plan`, each language-specific `ast_scan`, and `render`. If a call stops making progress, the last `status=started` stage identifies the blocking boundary without logging the search expression or source text.
