@@ -106,7 +106,7 @@ CodeKit is the required default path for source-code analysis.
 
 - `vulcan-codekit-repo-map` returns a directory-only tree, complete/recognized/unrecognized file counts, byte totals, all-language Tokei statistics, and explicit folding diagnostics.
 - `vulcan-codekit-ast-tree` returns a grouped Markdown tree with compact metrics such as lines, types, impl blocks, and functions.
-- `vulcan-codekit-rg` returns matched lines together with the owning function, method, impl, or class context.
+- `vulcan-codekit-rg` preserves all matching lines in the selected search scope, adding indexed owner context where available and grouping other hits under `@ Unowned matches (no indexed AST owner)`.
 - `vulcan-codekit-ast-detail` returns a structured symbol tree with nesting, signatures, and line ownership.
 - `vulcan-codekit-node-source` returns exact current function or method sources for the paired whole-function patch workflow, supports cross-file `nodes[]` batches, and declares host-managed `truncate` overflow mode.
 - Tools return plain strings. If the result exceeds the current client budget, the MCP host decides whether to keep it inline, truncate it, or render it as a paged read directory.
@@ -184,6 +184,7 @@ Remember:
 
 - this is not the first-pass exploration tool
 - the output is limited to owner context plus matched lines; it does not expand full function bodies
+- hits outside indexed AST ranges and files without indexed symbols still return file paths and matching lines; extension filters and ignore rules still apply
 - `rg_pattern` uses Rust regex by default; set `regex_engine="pcre2"` only for PCRE2-only features
 - prefer this over plain grep when a clue may need owner context
 

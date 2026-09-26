@@ -183,6 +183,8 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 `rg_pattern` 默认使用 ripgrep 的 Rust regex 引擎。只有当模式需要 look-around 或 backreference 等 PCRE2 特性时，才把 `regex_engine` 设为 `pcre2`。可选的 `extensions` 过滤参数接受逗号分隔扩展名或语言名；未传时使用 `skill.yaml` 中声明的精确默认源码扩展集合，并排除 css、html、json、yaml/yml、hcl/tf/tfvars 和 md 等非核心格式。
 
+上述检索范围内的全部文本命中都会保留。索引 AST 范围外的顶层常量、导入、模块声明和注释等内容，以 `@ Unowned matches (no indexed AST owner)` 分组返回文件路径、行号与命中文本；完全没有索引符号的文件同样返回命中，已有索引归属的命中继续携带原有结构上下文。
+
 ### `vulcan-codekit-markdown-menu`
 
 先看文档标题树，再决定读正文。

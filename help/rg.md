@@ -27,7 +27,9 @@ Typical route:
 2. Run `rg`.
 3. Use the returned owner context to decide whether `ast-detail` is needed next.
 
-Output focuses on matching lines and their owning structure. It does not export Markdown to a caller-provided path; `export_md_path` is unsupported.
+Output preserves all matching lines in the selected search scope. Indexed matches include their owning structure. Matches outside indexed AST ranges (such as top-level constants, imports, module declarations, and comments) appear under `@ Unowned matches (no indexed AST owner)` with the file path and `L<number>: <text>`. Files with no indexed symbols still return their matching lines. This group describes missing index coverage, not an AST scan failure. Extension filters and ignore rules still apply.
+
+The tool does not export Markdown to a caller-provided path; `export_md_path` is unsupported.
 
 AST enrichment is deliberately bounded because `rg` can match generated bundles and dependency trees that are fast to search but expensive to parse synchronously. A single file larger than 2 MiB, aggregate admitted input larger than 8 MiB, or matches beyond the first 100 admitted files skip AST enrichment. Their direct RG lines remain in the result together with an `ast_enrichment_skipped` diagnostic.
 

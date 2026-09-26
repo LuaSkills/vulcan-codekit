@@ -28,6 +28,12 @@ jobs:
       - name: Validate strict skill layout
         run: python ./scripts/validate_skill.py
 
+      - name: Install Lua for runtime regression checks
+        run: sudo apt-get install -y lua5.4
+
+      - name: Verify RG matches inside and outside indexed AST ranges
+        run: lua5.4 ./scripts/verify_rg_matches.lua
+
       - name: Package LuaSkill release path smoke
         run: python ./scripts/package_skill.py --out-dir dist-skill-smoke
 

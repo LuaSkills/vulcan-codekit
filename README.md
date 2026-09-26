@@ -183,6 +183,8 @@ For large repositories, this is not a small improvement. It is a change in effic
 
 `rg_pattern` uses ripgrep's Rust regex engine by default. Set `regex_engine` to `pcre2` only when the pattern needs PCRE2 features such as look-around or backreferences. The optional `extensions` filter accepts comma-separated extensions or language names; when omitted, CodeKit scans the exact default source-code set declared in `skill.yaml`, excluding non-core formats such as css, html, json, yaml/yml, hcl/tf/tfvars, and md.
 
+All text hits within that search scope are retained. Lines outside indexed AST ranges, including top-level constants, imports, module declarations, and comments, appear under `@ Unowned matches (no indexed AST owner)` with their file path and line number. Files without indexed symbols also return their hits; indexed matches retain their existing owner context.
+
 ### `vulcan-codekit-markdown-menu`
 
 Read the document heading tree first, then decide which body text to open.

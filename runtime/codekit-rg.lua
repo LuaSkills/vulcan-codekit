@@ -1,7 +1,7 @@
 --[[
 codekit-rg
-先基于 ripgrep 做文本命中，再结合 codekit-ast-detail 的结构能力，仅输出与命中行直接相关的 AST 结构。
-Perform ripgrep text matching first, then reuse codekit-ast-detail structural analysis to return only AST structures directly related to the matched lines.
+Preserve ripgrep text matches and enrich indexed lines with codekit-ast-detail owner context.
+保留 ripgrep 文本命中，并通过 codekit-ast-detail 为索引范围内的行补充归属上下文。
 ]]
 
 -- 工具常量 / Tool constants for rg execution and response shaping.
@@ -1052,63 +1052,86 @@ local function append_symbol_tree(lines, symbol, branch_state, is_last)
 end
 
 --[[
-根据 rg 命中行标记 AST 结构树，只保留与命中相关的祖先链、目标结构和必要子结构。
-Mark the AST tree according to rg hit lines, retaining only related ancestor chains, target structures, and necessary descendant structures.
-
-参数 / Parameters:
-- symbol_roots(table): 文件级 AST 结构树根节点 / File-level AST tree roots.
-- rg_hits(table): 当前文件的 rg 命中行数组 / rg matched lines for the current file.
-
-返回 / Returns:
-- boolean: 若存在可展示的相关结构则返回 true，否则返回 false。
-  True when there are relevant structures to render; otherwise false.
+Annotate indexed owners while retaining every hit outside their line ranges.
+标注已索引归属，同时保留其行范围外的全部命中。
+Parameters: symbol_roots is the file AST root list; rg_hits is its ordered ripgrep hit list.
+参数：symbol_roots 为文件 AST 根列表；rg_hits 为其有序 ripgrep 命中列表。
+Returns the ordered hits without an indexed owner; matching symbols are annotated in place.
+返回没有索引归属的有序命中列表；具有命中的符号在原地完成标注。
 ]]
 local function annotate_tree_with_rg_hits(symbol_roots, rg_hits)
     clear_symbol_marks(symbol_roots)
     attach_parent_links(symbol_roots, nil)
 
-    local has_relevant_symbol = false
-    for _, hit in ipairs(rg_hits or {}) do
+    -- Hits without a containing indexed symbol remain first-class text results.
+    -- 没有包含它们的索引符号的命中仍是完整的文本检索结果。
+    local unowned_hits = {}
+    for _, hit in ipairs(rg_hits) do
+        -- Resolve ownership only from the actual inclusive AST line ranges.
+        -- 仅根据真实的 AST 闭区间行范围确定归属。
         local matched_symbol = find_deepest_symbol_for_line(symbol_roots, hit.line)
         if matched_symbol then
+            -- A matched symbol always resolves to itself or an indexed ancestor.
+            -- 命中符号始终解析到自身或已索引祖先。
             local display_symbol = resolve_display_symbol(matched_symbol, hit.line)
-            if display_symbol then
-                mark_symbol_chain(display_symbol)
-                append_symbol_match_line(display_symbol, hit.line, hit.text)
-                has_relevant_symbol = true
-            end
+            mark_symbol_chain(display_symbol)
+            append_symbol_match_line(display_symbol, hit.line, hit.text)
+        else
+            -- Missing AST coverage must not discard a successful ripgrep match.
+            -- 缺少 AST 覆盖不能丢弃已经成功检索到的 ripgrep 命中。
+            table.insert(unowned_hits, hit)
         end
     end
 
     sort_symbol_match_lines(symbol_roots)
-    return has_relevant_symbol
+    return unowned_hits
 end
 
-local function build_filtered_file_content(symbol_roots)
+--[[
+Render direct file-level hits and the indexed owner chains that contain other hits.
+渲染文件级直接命中，以及包含其余命中的索引归属链。
+Parameters: symbol_roots contains annotated AST roots; unowned_hits contains unmatched-owner hits.
+参数：symbol_roots 包含已标注的 AST 根节点；unowned_hits 包含无索引归属的命中。
+Returns one file's text body, preserving every hit without expanding function bodies.
+返回单个文件的文本正文，保留全部命中且不展开函数体。
+]]
+local function build_filtered_file_content(symbol_roots, unowned_hits)
+    -- File-level direct hits and existing owner groups share the same line format.
+    -- 文件级直接命中与现有归属分组使用相同的行格式。
     local lines = {}
+    if #unowned_hits > 0 then
+        table.insert(lines, "@ Unowned matches (no indexed AST owner)")
+        for _, hit in ipairs(unowned_hits) do
+            table.insert(lines, format_match_label(hit))
+        end
+    end
 
     --[[
-    递归收集命中结构的扁平输出条目，只为真正承载命中行的节点生成 `@ ...` 头部。
-    Recursively collect flat render entries and emit `@ ...` headers only for nodes that actually own matched lines.
-
-    参数 / Parameters:
-    - symbols(table): 当前层级的符号列表 / Symbols at the current traversal level.
-    - ancestor_chain(table): 外层已命中的结构链 / Already matched outer structural chain.
+    Emit owner headers only for symbols carrying matched lines, retaining ancestor context.
+    仅为承载命中行的符号输出归属头部，同时保留祖先上下文。
+    Parameters: symbols is the current symbol list; ancestor_chain is its enclosing owner chain.
+    参数：symbols 为当前符号列表；ancestor_chain 为其外层归属链。
+    Returns nothing; appends owner headers and matching lines to the file output.
+    无返回值；向文件输出追加归属头部和命中行。
     ]]
     local function collect_flat_entries(symbols, ancestor_chain)
-        for _, symbol in ipairs(symbols or {}) do
+        for _, symbol in ipairs(symbols) do
             if symbol.__vmcp_rg_include then
-                local current_chain = clone_array(ancestor_chain or {})
+                -- Copy the ancestor chain so sibling owners cannot contaminate each other.
+                -- 复制祖先链，避免同级归属节点相互污染。
+                local current_chain = clone_array(ancestor_chain)
                 table.insert(current_chain, symbol)
 
+                -- Ancestors may be marked only for context and carry no direct line matches.
+                -- 祖先可能仅因上下文被标记，本身不承载直接命中行。
                 if #(symbol.__vmcp_rg_line_matches or {}) > 0 then
                     table.insert(lines, format_symbol_chain_label(current_chain))
-                    for _, match_item in ipairs(symbol.__vmcp_rg_line_matches or {}) do
+                    for _, match_item in ipairs(symbol.__vmcp_rg_line_matches) do
                         table.insert(lines, format_match_label(match_item))
                     end
                 end
 
-                collect_flat_entries(symbol.children or {}, current_chain)
+                collect_flat_entries(symbol.children, current_chain)
             end
         end
     end
@@ -1248,36 +1271,37 @@ local function build_direct_rg_file_results(skipped_files, hits_by_canonical_fil
 end
 
 --[[
-根据预先收集的文件上下文统一生成 rg 文件结果，固定只输出命中结构与命中行，保持结果协议单一稳定。
-Build rg file results from pre-collected file contexts and always emit only matched structures plus matched lines so the response protocol stays single and stable.
-
-参数 / Parameters:
-- render_contexts(table): 每个文件的命中、符号与文件元信息 / Per-file hit, symbol, and file metadata contexts.
-- helper_bundle(table): 复用的 codekit-ast-detail 助手集合 / Reused codekit-ast-detail helper bundle.
-
-返回 / Returns:
-- table: 渲染后的文件结果列表 / Rendered file result list.
-- number: 文件级结果条目数量 / File-level rendered item count.
+Build file results from all RG hits, supplementing them with indexed owner context when present.
+根据全部 RG 命中构建文件结果，并在存在索引归属时补充上下文。
+Parameters: render_contexts contains per-file hits, symbols, and metadata; helper_bundle supplies AST helpers.
+参数：render_contexts 包含逐文件命中、符号和元数据；helper_bundle 提供 AST 辅助函数。
+Returns file results sorted by path; files without text hits produce no result.
+返回按路径排序的文件结果；没有文本命中的文件不产生结果。
 ]]
 local function build_rg_file_results(render_contexts, helper_bundle)
+    -- Every file with RG hits is rendered, including files with an empty symbol index.
+    -- 每个存在 RG 命中的文件都会被渲染，包括符号索引为空的文件。
     local file_results = {}
 
-    for _, render_context in ipairs(render_contexts or {}) do
-        if #render_context.symbols > 0 and #render_context.file_hits > 0 then
+    for _, render_context in ipairs(render_contexts) do
+        if #render_context.file_hits > 0 then
+            -- The shared builder accepts an empty symbol list and returns an empty tree.
+            -- 共享建树方法接受空符号列表并返回空树。
             local tree = helper_bundle.build_symbol_tree(render_context.symbols)
-            local has_relevant_symbol = annotate_tree_with_rg_hits(tree, render_context.file_hits)
-            if has_relevant_symbol then
-                local content = build_filtered_file_content(tree)
-                if trim(content) ~= "" then
-                    table.insert(file_results, {
-                        file = render_context.file_info.display_file or render_context.file_info.path,
-                        content = content,
-                    })
-                end
-            end
+            -- Preserve hits outside indexed ranges separately from annotated symbol owners.
+            -- 在已标注符号归属之外，单独保留索引范围外的命中。
+            local unowned_hits = annotate_tree_with_rg_hits(tree, render_context.file_hits)
+            table.insert(file_results, {
+                -- Display paths are optional in the existing AST file descriptor contract.
+                -- 现有 AST 文件描述契约中的显示路径为可选字段。
+                file = render_context.file_info.display_file or render_context.file_info.path,
+                content = build_filtered_file_content(tree, unowned_hits),
+            })
         end
     end
 
+    -- Compare rendered file paths; left and right are file results, returning ascending order.
+    -- 比较渲染文件路径；left 和 right 为文件结果，返回升序判断值。
     table.sort(file_results, function(left, right)
         return left.file < right.file
     end)
