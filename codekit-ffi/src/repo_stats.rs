@@ -33,6 +33,9 @@ const MAX_RENDERED_DIRECTORIES: usize = 10_000;
 /// Maximum number of individual traversal diagnostics retained in one response.
 /// 单次响应保留的目录遍历诊断数量上限。
 const MAX_DIAGNOSTICS: usize = 100;
+/// Maximum Rayon workers owned by one repository scan.
+/// 单次仓库扫描拥有的 Rayon 工作线程上限。
+const MAX_SCAN_WORKERS: usize = 4;
 /// Stable repository-statistics protocol version.
 /// 稳定的仓库统计协议版本。
 pub(crate) const REPO_STATS_PROTOCOL_VERSION: &str = "1";
@@ -947,7 +950,27 @@ fn apply_tokei_statistics(
     // Borrow hard-exclude patterns in Tokei's required string-slice form.
     // 以 Tokei 所需的字符串切片形式借用强制排除模式。
     let ignored = TOKEI_HARD_EXCLUDE_PATTERNS.as_slice();
-    languages.get_statistics(&[request.root.as_path()], ignored, &config);
+    // Tokei uses Rayon internally. A global pool would outlive the Lua VM and execute
+    // unmapped DLL code after ffi.load is released during a skill update. Scoped
+    // workers are joined, including their TLS destructors, before this call returns.
+    // Tokei 内部使用 Rayon；全局池会活得比 Lua VM 更久，在更新释放 ffi.load 后执行
+    // 已卸载的 DLL 代码。作用域线程会在返回前全部退出，包含线程局部存储的析构。
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_SCAN_WORKERS)
+        .build_scoped(
+            |worker| worker.run(),
+            |pool| {
+                pool.install(|| {
+                    languages.get_statistics(&[request.root.as_path()], ignored, &config);
+                });
+            },
+        )
+        .map_err(|error| {
+            RepoStatsError::new(
+                "scan_workers_unavailable",
+                format!("could not start scoped repository scan workers: {error}"),
+            )
+        })?;
 
     // Track recognized paths so each physical file contributes once to recognized-file totals.
     // 跟踪已识别路径，确保每个物理文件只对已识别文件总量贡献一次。

@@ -412,6 +412,10 @@ jobs:
       - name: Execute unified CodeKit FFI public ABI smoke
         run: python ./scripts/smoke_ffi.py --library-path ${{ matrix.library_path }} --repo-root .
 
+      - name: Verify Windows DLL worker shutdown and reload
+        if: runner.os == 'Windows'
+        run: python ./scripts/check_ffi_unload.py --library-path ${{ matrix.library_path }}
+
       - name: Package unified CodeKit FFI
         run: python ./scripts/package_ffi.py --platform ${{ matrix.platform }} --library-path ${{ matrix.library_path }}
 

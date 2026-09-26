@@ -5,6 +5,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  windows-unload:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build Windows DLL with bounded compilation
+        run: cargo build --manifest-path codekit-ffi/Cargo.toml --release --locked -j 4
+      - name: Verify workers stop before DLL unload and reload
+        run: python ./scripts/check_ffi_unload.py --library-path codekit-ffi/target/release/vulcan_codekit_ffi.dll
+
   validate:
     runs-on: ubuntu-latest
     steps:
