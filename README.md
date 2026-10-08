@@ -185,6 +185,8 @@ For large repositories, this is not a small improvement. It is a change in effic
 
 All text hits within that search scope are retained. Lines outside indexed AST ranges, including top-level constants, imports, module declarations, and comments, appear under `@ Unowned matches (no indexed AST owner)` with their file path and line number. Files without indexed symbols also return their hits; indexed matches retain their existing owner context.
 
+Abnormally long lines use UTF-8-safe excerpts around every occurrence, retaining source byte ranges and explaining why text was omitted. Oversized matched spans retain their full range and both ends. This bounds individual output lines without dropping matches; large result sets remain pageable. See [RG preview behavior](help/rg.md) for the runtime-owned limits and output format.
+
 ### `vulcan-codekit-markdown-menu`
 
 Read the document heading tree first, then decide which body text to open.

@@ -69,7 +69,7 @@ entries:
         description: "Include condensed comment summaries for functions in the structural output (default: false). Separator-style comment banners and metadata-only lines such as params/returns are filtered out, and each summary is compressed to a short single-line note."
         required: false
   - name: rg
-    description: "[TEXT-TO-STRUCTURE BRIDGE] Search a directory with ripgrep and return all matching lines in the selected scope as plain Markdown. Include indexed AST owner context where available; preserve matches outside indexed ranges as file-level unowned matches, even when a file has no indexed symbols."
+    description: "[TEXT-TO-STRUCTURE BRIDGE] Search a directory with ripgrep and return all matching lines in the selected scope as plain Markdown. Include indexed AST owner context where available; preserve matches outside indexed ranges as file-level unowned matches, even when a file has no indexed symbols. Oversized lines use match-centered excerpts with byte ranges and explicit truncation reasons; no occurrences are dropped."
     lua_entry: runtime/codekit-rg.lua
     lua_module: codekit_rg
     help: rg

@@ -7,6 +7,12 @@ Preserve ripgrep text matches and enrich indexed lines with codekit-ast-detail o
 -- 工具常量 / Tool constants for rg execution and response shaping.
 local RG_TIMEOUT_MS = 30000
 local MAX_MATCH_LINES_PER_SYMBOL = 12
+-- Source-line preview budget, independent of the host's total-result paging budget.
+-- 源码行预览预算，独立于宿主的结果总量分页预算。
+local MAX_RG_LINE_PREVIEW_BYTES = 4096
+-- Context retained on each side of every match in an oversized source line.
+-- 超长源码行中每个命中两侧保留的上下文字节数。
+local RG_MATCH_CONTEXT_BYTES = 128
 -- Maximum size of one file admitted to synchronous AST enrichment.
 -- 单个文件进入同步 AST 增强阶段时允许的最大字节数。
 local MAX_AST_ENRICHMENT_FILE_BYTES = 2 * 1024 * 1024
@@ -925,18 +931,25 @@ local function mark_symbol_subtree(symbol)
     end
 end
 
-local function append_symbol_match_line(symbol, line_number, line_text)
+--[[
+Attach one complete RG record to an owner, deduplicating repeated line records.
+将完整 RG 记录附加到归属符号，并去除重复的行记录。
+Parameters: symbol is the AST owner; match_item contains the line, text and submatch offsets.
+参数：symbol 为 AST 归属；match_item 包含行号、文本和子命中字节偏移。
+Returns nothing; updates only the owner's rendering annotations.
+无返回值；仅更新归属符号的渲染标记。
+]]
+local function append_symbol_match_line(symbol, match_item)
     symbol.__vmcp_rg_line_matches = symbol.__vmcp_rg_line_matches or {}
-    local dedupe_key = tostring(line_number) .. "::" .. tostring(line_text)
+    -- Keep the original RG record so byte offsets survive AST owner assignment.
+    -- 保留原始 RG 记录，使字节偏移在分配 AST 归属后仍然存在。
+    local dedupe_key = tostring(match_item.line) .. "::" .. tostring(match_item.text)
     symbol.__vmcp_rg_line_match_keys = symbol.__vmcp_rg_line_match_keys or {}
     if symbol.__vmcp_rg_line_match_keys[dedupe_key] then
         return
     end
     symbol.__vmcp_rg_line_match_keys[dedupe_key] = true
-    table.insert(symbol.__vmcp_rg_line_matches, {
-        line = line_number,
-        text = line_text,
-    })
+    table.insert(symbol.__vmcp_rg_line_matches, match_item)
 end
 
 local function clear_symbol_marks(symbols)
@@ -986,8 +999,127 @@ local function format_symbol_chain_label(symbol_chain)
     return "@ " .. table.concat(parts, " :: ")
 end
 
+--[[
+Expand a byte window to whole UTF-8 characters without scanning the full source line.
+将字节窗口向外扩展到完整 UTF-8 字符，无需扫描整条源码行。
+Parameters: text is RG UTF-8 text; first and last are zero-based, end-exclusive offsets.
+参数：text 为 RG UTF-8 文本；first 和 last 为从零开始、右侧不包含的偏移。
+Returns a clamped window with first and last offsets; each edge expands by at most three bytes.
+返回夹定范围后的 first 和 last 窗口；每侧最多扩展三个字节。
+]]
+local function rg_utf8_window(text, first, last)
+    first = math.max(0, math.min(#text, first))
+    last = math.max(first, math.min(#text, last))
+    while first > 0 and first < #text and text:byte(first + 1) >= 128 and text:byte(first + 1) < 192 do
+        first = first - 1
+    end
+    while last < #text and text:byte(last + 1) >= 128 and text:byte(last + 1) < 192 do
+        last = last + 1
+    end
+    return { first = first, last = last }
+end
+
+--[[
+Append a bounded source excerpt with its original offsets and covered match indexes.
+附加有界源码片段，并标记原始偏移和所覆盖的命中序号。
+Parameters: lines receives output; text is the original line; window is a UTF-8-aligned range.
+参数：lines 接收输出；text 为原始行；window 为按 UTF-8 对齐的范围。
+Parameters: first_match and last_match identify the inclusive RG submatch index range.
+参数：first_match 和 last_match 表示包含两端的 RG 子命中序号范围。
+Returns nothing; ellipses mark source context omitted outside this excerpt.
+无返回值；省略号标记片段之外未展示的源码上下文。
+]]
+local function append_rg_excerpt(lines, text, window, first_match, last_match)
+    table.insert(lines, string.format(
+        "  [matches %d-%d; bytes [%d,%d)]: %s%s%s",
+        first_match, last_match, window.first, window.last,
+        window.first > 0 and "..." or "",
+        text:sub(window.first + 1, window.last),
+        window.last < #text and "..." or ""
+    ))
+end
+
+--[[
+Render a matching line, bounding oversized previews while retaining every RG occurrence.
+渲染命中行，限制超长预览，同时保留每个 RG 命中。
+Parameters: match_item contains the source line number, UTF-8 text and RG submatch offsets.
+参数：match_item 包含源码行号、UTF-8 文本和 RG 子命中字节偏移。
+Returns Markdown with unchanged short lines or explicitly annotated long-line excerpts.
+返回 Markdown；短行维持原样，超长行使用带明确说明的片段。
+]]
 local function format_match_label(match_item)
-    return string.format("L%d: %s", match_item.line, trim(match_item.text))
+    -- Measure the original line before trimming so indentation cannot hide an oversized record.
+    -- 在去除首尾空白前度量原始行，避免缩进掩盖超长记录。
+    local text = match_item.text
+    if #text <= MAX_RG_LINE_PREVIEW_BYTES then
+        return string.format("L%d: %s", match_item.line, trim(text))
+    end
+    -- These offsets come from rg --json; never guess a match location from the search expression.
+    -- 偏移来自 rg --json；绝不根据搜索表达式猜测命中位置。
+    local submatches = match_item.submatches
+    assert(type(submatches) == "table" and #submatches > 0, "long RG line requires submatch offsets")
+    -- Each excerpt remains a short physical output line so the host can page large result sets.
+    -- 每个片段保持为较短的物理输出行，使宿主能够为大量结果分页。
+    local lines = { string.format(
+        "L%d: [line preview truncated: %d bytes exceeds %d-byte preview limit; all %d matches retained; "
+            .. "unshown source text omitted; byte ranges are zero-based UTF-8, end-exclusive]",
+        match_item.line, #text, MAX_RG_LINE_PREVIEW_BYTES, #submatches
+    ) }
+    -- Pending overlapping context, merged only while it still fits one bounded excerpt.
+    -- 待输出的重叠上下文，合并后仍满足单个有界片段大小时才继续合并。
+    local pending, first_match, last_match
+    --[[
+    Flush the current excerpt once; takes no arguments and returns nothing.
+    输出当前片段一次；无参数、无返回值。
+    ]]
+    local function flush()
+        if pending then
+            append_rg_excerpt(lines, text, pending, first_match, last_match)
+            pending = nil
+        end
+    end
+    for index, submatch in ipairs(submatches) do
+        -- RG reports half-open byte offsets, including positions at line-ending boundaries.
+        -- RG 报告左闭右开的字节偏移，包括位于行结束符边界的位置。
+        local first, last = submatch.start, submatch["end"]
+        assert(type(first) == "number" and type(last) == "number" and first >= 0 and last >= first,
+            "invalid RG submatch byte range")
+        -- Reserve two UTF-8 characters for outward alignment, in addition to both context margins.
+        -- 除两侧上下文外，为向外对齐额外预留两个 UTF-8 字符的空间。
+        if last - first > MAX_RG_LINE_PREVIEW_BYTES - 2 * RG_MATCH_CONTEXT_BYTES - 8 then
+            flush()
+            table.insert(lines, string.format(
+                "  [match %d; bytes [%d,%d); match preview truncated: matched text plus context exceeds "
+                    .. "%d-byte preview limit; middle omitted]",
+                index, first, last, MAX_RG_LINE_PREVIEW_BYTES
+            ))
+            append_rg_excerpt(lines, text,
+                rg_utf8_window(text, first - RG_MATCH_CONTEXT_BYTES, first + RG_MATCH_CONTEXT_BYTES),
+                index, index)
+            append_rg_excerpt(lines, text,
+                rg_utf8_window(text, last - RG_MATCH_CONTEXT_BYTES, last + RG_MATCH_CONTEXT_BYTES),
+                index, index)
+        else
+            if first == last then
+                -- Record the exact position without breaking context merging for dense empty matches.
+                -- 记录精确位置，同时保持密集空匹配的上下文合并。
+                table.insert(lines, string.format("  [match %d; zero-width at byte %d]", index, first))
+            end
+            -- All non-abbreviated matches fit completely inside their windows, even at UTF-8 edges.
+            -- 所有未缩略的命中均完整包含在窗口内，UTF-8 边界处也不例外。
+            local window = rg_utf8_window(text, first - RG_MATCH_CONTEXT_BYTES, last + RG_MATCH_CONTEXT_BYTES)
+            if pending and window.first <= pending.last
+                and math.max(pending.last, window.last) - pending.first <= MAX_RG_LINE_PREVIEW_BYTES then
+                pending.last = math.max(pending.last, window.last)
+                last_match = index
+            else
+                flush()
+                pending, first_match, last_match = window, index, index
+            end
+        end
+    end
+    flush()
+    return table.concat(lines, "\n")
 end
 
 local function build_tree_prefix(branch_state, is_last)
@@ -1075,7 +1207,7 @@ local function annotate_tree_with_rg_hits(symbol_roots, rg_hits)
             -- 命中符号始终解析到自身或已索引祖先。
             local display_symbol = resolve_display_symbol(matched_symbol, hit.line)
             mark_symbol_chain(display_symbol)
-            append_symbol_match_line(display_symbol, hit.line, hit.text)
+            append_symbol_match_line(display_symbol, hit)
         else
             -- Missing AST coverage must not discard a successful ripgrep match.
             -- 缺少 AST 覆盖不能丢弃已经成功检索到的 ripgrep 命中。
@@ -1376,39 +1508,86 @@ local function finalize_rg_result(full_result)
 end
 
 --[[
-把结构化错误对象编码成稳定文本，确保工具入口最终始终返回 plain string。
-Encode one structured error object into stable text so the public tool entry always returns a plain string.
+Escape a diagnostic value as Markdown text while preserving line breaks and list indentation.
+将诊断值转义为 Markdown 文本，同时保留换行与列表缩进。
+Parameters: value is a scalar error field; indent is its enclosing list indentation.
+参数：value 为错误标量字段；indent 为所在列表的缩进。
+Returns escaped text; paths, regexes and external error text cannot create Markdown blocks.
+返回转义文本；路径、正则及外部错误文本不会生成 Markdown 块。
 ]]
-local function encode_codekit_error_payload(error_payload)
-    if type(error_payload) == "string" then
-        return error_payload, "text"
-    end
-
-    local ok, encoded = pcall(vulcan.json.encode, error_payload)
-    if ok and type(encoded) == "string" and encoded ~= "" then
-        return encoded, "json"
-    end
-
-    return tostring(error_payload), "text"
+local function escape_error_markdown(value, indent)
+    return (tostring(value):gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("(%p)", "\\%1")
+        :gsub("\n", "  \n" .. indent .. "  "))
 end
 
 --[[
-把当前入口的错误结果统一渲染成 Markdown 字符串，避免直接返回 table。
-Render one Markdown string for current entry errors so the tool never returns a raw table.
+Append error maps and diagnostic arrays as nested Markdown lists, preserving every field.
+将错误对象和诊断数组附加为嵌套 Markdown 列表，保留全部字段。
+Parameters: lines receives output; fields is a JSON-shaped table; indent controls nesting.
+参数：lines 接收输出；fields 为 JSON 形状的表；indent 控制嵌套。
+Returns nothing; error identifiers and messages precede other fields, and arrays retain order.
+无返回值；错误标识和原因位于其他字段之前，数组保留顺序。
+]]
+local function append_codekit_error_fields(lines, fields, indent)
+    -- Sort keys without serializing the table back into JSON.
+    -- 对键排序，不将表重新序列化为 JSON。
+    local keys = {}
+    for key in pairs(fields) do
+        table.insert(keys, key)
+    end
+    -- Fixed field priority for the existing error/message contract.
+    -- 既有 error/message 契约的固定字段优先级。
+    local priority = { error = 1, message = 2 }
+    -- Compare two keys; numeric array indexes sort numerically, object keys by priority then name.
+    -- 比较两个键；数组数字索引按数值排序，对象键先按优先级再按名称排序。
+    table.sort(keys, function(left, right)
+        if type(left) == "number" and type(right) == "number" then
+            return left < right
+        end
+        if (priority[left] or 3) ~= (priority[right] or 3) then
+            return (priority[left] or 3) < (priority[right] or 3)
+        end
+        return tostring(left) < tostring(right)
+    end)
+    for _, key in ipairs(keys) do
+        -- A table is a nested diagnostic object or array; scalars remain readable text.
+        -- 表表示嵌套诊断对象或数组；标量保持为可读文本。
+        local value = fields[key]
+        -- Escaped field label, with indentation derived solely from the diagnostic structure.
+        -- 转义后的字段标签，缩进仅由诊断结构派生。
+        local label = indent .. "- **" .. escape_error_markdown(key, "") .. "**:"
+        if type(value) == "table" then
+            table.insert(lines, label)
+            append_codekit_error_fields(lines, value, indent .. "  ")
+        else
+            table.insert(lines, label .. " " .. escape_error_markdown(value, indent))
+        end
+    end
+end
+
+--[[
+Render RG failures directly as Markdown rather than embedding a serialized error object.
+将 RG 失败直接渲染为 Markdown，不再嵌入序列化错误对象。
+Parameters: tool_title names the tool; error_payload is a structured error or plain diagnostic.
+参数：tool_title 为工具名称；error_payload 为结构化错误或纯文本诊断。
+Returns a Markdown string preserving the failure state, cause and all diagnostic details.
+返回 Markdown 字符串，保留失败状态、原因与全部诊断细节。
 ]]
 local function render_codekit_error_markdown(tool_title, error_payload)
-    local payload_text, payload_language = encode_codekit_error_payload(error_payload)
-    return table.concat({
-        "# " .. tostring(tool_title or "CodeKit Error"),
+    -- Failure metadata is visible directly in the rendered Markdown.
+    -- 失败元数据直接显示在渲染后的 Markdown 中。
+    local lines = {
+        "# " .. escape_error_markdown(tool_title, ""),
         "",
-        "## Status",
-        "FAILED",
+        "Status: **FAILED**",
         "",
-        "## Error",
-        "```" .. tostring(payload_language or "text"),
-        payload_text,
-        "```",
-    }, "\n")
+    }
+    if type(error_payload) == "table" then
+        append_codekit_error_fields(lines, error_payload, "")
+    else
+        table.insert(lines, escape_error_markdown(error_payload, ""))
+    end
+    return table.concat(lines, "\n")
 end
 
 -- 工具入口 / Tool entry point invoked by the MCP runtime.

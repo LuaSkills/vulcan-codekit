@@ -185,6 +185,7 @@ Remember:
 - this is not the first-pass exploration tool
 - the output is limited to owner context plus matched lines; it does not expand full function bodies
 - hits outside indexed AST ranges and files without indexed symbols still return file paths and matching lines; extension filters and ignore rules still apply
+- oversized lines use match-centered UTF-8 excerpts with source byte ranges and explicit omission reasons; all occurrences remain represented, including full ranges and both ends for oversized matched spans
 - `rg_pattern` uses Rust regex by default; set `regex_engine="pcre2"` only for PCRE2-only features
 - prefer this over plain grep when a clue may need owner context
 
