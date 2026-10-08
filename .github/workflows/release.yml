@@ -225,12 +225,14 @@ jobs:
           $skillVersion = Read-SkillVersion -Path "skill.yaml"
           $ffiVersion = Read-CargoPackageVersion -Path "codekit-ffi/Cargo.toml"
           $dependencyVersion = Read-CodeKitFfiDependencyVersion -Path "dependencies.yaml"
-          if ($ffiVersion -ne $skillVersion) {
-            throw "codekit-ffi version $ffiVersion must match skill.yaml version $skillVersion"
+          if ($dependencyVersion -ne $ffiVersion) {
+            throw "codekit-ffi dependency version $dependencyVersion must match codekit-ffi Cargo version $ffiVersion"
           }
-          if ($dependencyVersion -ne $skillVersion) {
-            throw "codekit-ffi dependency version $dependencyVersion must match skill.yaml version $skillVersion"
-          }
+          # The FFI is versioned independently; only a release whose FFI version equals the skill version
+          # builds native assets, otherwise dependencies.yaml installs them from release v{ffi version}.
+          # FFI 独立版本化；只有 FFI 版本等于技能版本的发布才构建原生资产，否则 dependencies.yaml
+          # 从 v{FFI 版本} 发布安装原生资产。
+          $buildFfi = $ffiVersion -eq $skillVersion
           $manifestTag = "v$skillVersion"
           if ($version -ne $manifestTag) {
             throw "release version $version must match tagged skill.yaml version $manifestTag"
@@ -249,11 +251,15 @@ jobs:
           # Targets stores only the FFI platforms explicitly left enabled for this release run.
           # Targets 仅保存本次发布明确启用的 FFI 平台。
           $targets = [System.Collections.Generic.List[object]]::new()
-          Add-FfiTarget -Targets $targets -Platform "linux-x64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_X64_RUNNER -Default "ubuntu-latest") -RustTarget "x86_64-unknown-linux-gnu" -LibraryPath "target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so"
-          Add-FfiTarget -Targets $targets -Platform "linux-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_ARM64_RUNNER -Default "ubuntu-24.04-arm") -RustTarget "aarch64-unknown-linux-gnu" -LibraryPath "target/aarch64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so"
-          Add-FfiTarget -Targets $targets -Platform "macos-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_ARM64_RUNNER -Default "macos-15") -RustTarget "aarch64-apple-darwin" -LibraryPath "target/aarch64-apple-darwin/release/libvulcan_codekit_ffi.dylib"
-          Add-FfiTarget -Targets $targets -Platform "macos-x64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_X64_RUNNER -Default "macos-15-intel") -RustTarget "x86_64-apple-darwin" -LibraryPath "target/x86_64-apple-darwin/release/libvulcan_codekit_ffi.dylib"
-          Add-FfiTarget -Targets $targets -Platform "windows-x64" -Runner (Normalize-Runner -Runner $env:INPUT_WINDOWS_X64_RUNNER -Default "windows-latest") -RustTarget "x86_64-pc-windows-msvc" -LibraryPath "target/x86_64-pc-windows-msvc/release/vulcan_codekit_ffi.dll"
+          if ($buildFfi) {
+            Add-FfiTarget -Targets $targets -Platform "linux-x64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_X64_RUNNER -Default "ubuntu-latest") -RustTarget "x86_64-unknown-linux-gnu" -LibraryPath "target/x86_64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so"
+            Add-FfiTarget -Targets $targets -Platform "linux-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_LINUX_ARM64_RUNNER -Default "ubuntu-24.04-arm") -RustTarget "aarch64-unknown-linux-gnu" -LibraryPath "target/aarch64-unknown-linux-gnu/release/libvulcan_codekit_ffi.so"
+            Add-FfiTarget -Targets $targets -Platform "macos-arm64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_ARM64_RUNNER -Default "macos-15") -RustTarget "aarch64-apple-darwin" -LibraryPath "target/aarch64-apple-darwin/release/libvulcan_codekit_ffi.dylib"
+            Add-FfiTarget -Targets $targets -Platform "macos-x64" -Runner (Normalize-Runner -Runner $env:INPUT_MACOS_X64_RUNNER -Default "macos-15-intel") -RustTarget "x86_64-apple-darwin" -LibraryPath "target/x86_64-apple-darwin/release/libvulcan_codekit_ffi.dylib"
+            Add-FfiTarget -Targets $targets -Platform "windows-x64" -Runner (Normalize-Runner -Runner $env:INPUT_WINDOWS_X64_RUNNER -Default "windows-latest") -RustTarget "x86_64-pc-windows-msvc" -LibraryPath "target/x86_64-pc-windows-msvc/release/vulcan_codekit_ffi.dll"
+          } else {
+            Write-Host "Reusing codekit-ffi $ffiVersion from release v$ffiVersion; FFI builds are skipped."
+          }
 
           $matrixJson = @{ include = @($targets) } | ConvertTo-Json -Compress -Depth 5
           $hasFfiTargets = if ($targets.Count -gt 0) { "true" } else { "false" }
@@ -287,6 +293,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare-release.outputs.version }}
+          # Full history and tags let release validation compare a reused FFI against its release tag.
+          # 完整历史与标签使发布校验能将复用的 FFI 与其发布标签比较。
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -303,7 +312,7 @@ jobs:
 
       - name: Validate manifests and generated license report
         run: |
-          python ./scripts/validate_skill.py
+          python ./scripts/validate_skill.py --release
           python ./scripts/generate_cargo_deny_notices.py --check
 
       - name: Validate unified CodeKit FFI
@@ -461,6 +470,6 @@ jobs:
 
             - Skill package assets follow the managed LuaSkill GitHub release naming rules.
             - This joint release includes the previously committed RG scale/diagnostic improvements and the new repository-first Repo Map workflow.
-            - Unified codekit-ffi assets provide compatible ast-grep scanning plus Tokei-powered repository statistics and are installed by dependencies.yaml from this same release.
+            - Unified codekit-ffi assets provide compatible ast-grep scanning plus Tokei-powered repository statistics and are installed by dependencies.yaml from the release named by its codekit-ffi version.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

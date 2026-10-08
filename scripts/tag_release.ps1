@@ -18,7 +18,7 @@ $tag = if ($Version.StartsWith("v")) { $Version } else { "v$Version" }
 
 # Validate the complete contract and read the canonical version from one implementation.
 # 通过同一实现校验完整契约并读取规范版本。
-$manifestVersion = python (Join-Path $repositoryRoot "scripts/validate_skill.py") --print-version
+$manifestVersion = python (Join-Path $repositoryRoot "scripts/validate_skill.py") --release --print-version
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

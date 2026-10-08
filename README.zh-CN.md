@@ -430,13 +430,20 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 repo: LuaSkills/vulcan-codekit
 ```
 
-GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push，以及对一个已存在标签进行手动重建。workflow 会先解析并检出不可变标签，再读取发布元数据；所选标签必须与 `v{该标签内 skill.yaml.version}` 一致。构建开始前，workflow 还会强制要求标签内的 `codekit-ffi` Cargo package 版本和 `dependencies.yaml` 中的 FFI 版本与技能版本完全一致。
+GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push，以及对一个已存在标签进行手动重建。workflow 会先解析并检出不可变标签，再读取发布元数据；所选标签必须与 `v{该标签内 skill.yaml.version}` 一致。
+
+`codekit-ffi` 与技能独立版本化。FFI 版本分布在四处，必须始终一致：`codekit-ffi/Cargo.toml`、`codekit-ffi/Cargo.lock` 中的 `vulcan-codekit-ffi` 条目、`dependencies.yaml` 中的 `codekit-ffi` 条目，以及 `runtime/codekit-ffi.lua` 的 `CODEKIT_FFI_VERSION`。FFI 版本不得新于技能版本：
+
+- 原生代码有改动：把 FFI 版本提升到新的技能版本，该发布会构建并发布 FFI 资产。
+- 只改 Lua：保持 FFI 版本不变，发布跳过 FFI 构建，安装继续从 `v{FFI 版本}` 发布下载已有资产，技能更新不会重复下载未变的原生库。
+
+`python scripts/validate_skill.py --release`（由打标脚本与发布 workflow 调用）会在复用的 FFI 版本缺少对应发布标签，或 `codekit-ffi/` 自该标签以来有改动时拒绝发布。
 
 - `build_luaskill=on/off`：是否构建并上传 LuaSkill 技能包
 - `luaskill_runner`：技能包构建 runner
 - 各平台 `*_runner`：对应 FFI 平台 runner，设为 `off` 即跳过该平台
 
-LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；只要 release tag 与三处版本声明全部一致，所有启用的产物都会上传到同一个 GitHub Release。标签自动触发时默认构建 LuaSkill 与声明的五个 FFI 平台。workflow 会先暂存全部产物，只有所有启用的校验与构建任务成功后才创建或更新 Release，并且不会取消正在执行的标签构建。统一原生资产命名为 `codekit-ffi-{platform}.zip`，对应校验文件命名为 `codekit-ffi-{platform}.sha256.txt`。运行时安装 FFI 组件时，LuaSkills 依赖管理器会根据 `dependencies.yaml` 中的 `version`、`repo` 与平台 `asset_name` 解析同一个 Release 下的对应资产。
+LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；所有启用的产物都会上传到同一个 GitHub Release。标签自动触发时默认构建 LuaSkill；FFI 版本等于技能版本时还会构建声明的五个 FFI 平台。workflow 会先暂存全部产物，只有所有启用的校验与构建任务成功后才创建或更新 Release，并且不会取消正在执行的标签构建。统一原生资产命名为 `codekit-ffi-{platform}.zip`，对应校验文件命名为 `codekit-ffi-{platform}.sha256.txt`。运行时安装 FFI 组件时，LuaSkills 依赖管理器会根据 `dependencies.yaml` 中的 `version`、`repo` 与平台 `asset_name` 解析 `v{FFI 版本}` 发布下的对应资产。
 
 Rust FFI 依赖许可证报告由 `cargo-deny` 自动生成：
 

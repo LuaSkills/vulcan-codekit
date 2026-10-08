@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -42,6 +43,16 @@ def is_valid_semver(value: str) -> bool:
         r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
     )
     return bool(pattern.fullmatch(value.strip()))
+
+
+"""
+Return the numeric major, minor, and patch components of one semantic version.
+返回单个语义化版本的主、次、补丁数字分量。
+"""
+def semver_core(value: str) -> tuple[int, int, int]:
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", value.strip())
+    require(match is not None, f"Invalid semantic version: {value}")
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
 """
@@ -81,6 +92,16 @@ def load_toml(path: Path) -> dict:
         payload = tomllib.load(handle)
     require(isinstance(payload, dict), f"Expected one TOML object in {path}")
     return payload
+
+
+"""
+Return the authoritative codekit-ffi version declared by its Cargo package table.
+返回 codekit-ffi Cargo package 表声明的权威版本。
+"""
+def read_ffi_version(root: Path) -> str:
+    cargo_package = load_toml(root / "codekit-ffi" / "Cargo.toml").get("package", {})
+    require(isinstance(cargo_package, dict), "codekit-ffi Cargo.toml must declare [package]")
+    return str(cargo_package.get("version", "")).strip()
 
 
 """
@@ -302,17 +323,31 @@ Validate the dependency manifest used by the CodeKit package.
 校验 CodeKit 包使用的依赖清单。
 """
 def validate_dependencies(root: Path) -> None:
-    # Load the skill version so dependency and automatic Release versions cannot diverge.
-    # 加载技能版本，避免依赖版本与自动 Release 版本发生分歧。
+    # Load the skill version; the FFI version is independent but may never be newer than the skill.
+    # 加载技能版本；FFI 版本独立演进，但不得新于技能版本。
     skill_manifest = load_yaml(root / "skill.yaml")
-    skill_version = skill_manifest.get("version")
+    skill_version = str(skill_manifest.get("version"))
     # Load the unified native crate version from its authoritative Cargo package table.
     # 从权威 Cargo package 表加载统一原生 crate 版本。
     cargo_manifest = load_toml(root / "codekit-ffi" / "Cargo.toml")
     cargo_package = cargo_manifest.get("package", {})
     require(isinstance(cargo_package, dict), "codekit-ffi Cargo.toml must declare [package]")
     require(cargo_package.get("name") == "vulcan-codekit-ffi", "codekit-ffi Cargo package name mismatch")
-    require(cargo_package.get("version") == skill_version, "codekit-ffi Cargo version must match skill.yaml version")
+    ffi_version = read_ffi_version(root)
+    require(is_valid_semver(ffi_version), "codekit-ffi Cargo version must be a semantic version")
+    require(
+        semver_core(ffi_version) <= semver_core(skill_version),
+        "codekit-ffi Cargo version must not be newer than skill.yaml version",
+    )
+    # Keep the lockfile root package identical to the manifest version.
+    # 保持锁文件根 package 版本与清单版本一致。
+    cargo_lock = load_toml(root / "codekit-ffi" / "Cargo.lock")
+    locked_versions = [
+        item.get("version")
+        for item in cargo_lock.get("package", [])
+        if isinstance(item, dict) and item.get("name") == "vulcan-codekit-ffi"
+    ]
+    require(locked_versions == [ffi_version], "codekit-ffi Cargo.lock version must match Cargo.toml version")
     # Validate the unified dynamic-library identity and the exact no-CLI Tokei integration.
     # 校验统一动态库身份与精确的无 CLI Tokei 集成。
     cargo_library = cargo_manifest.get("lib", {})
@@ -337,8 +372,8 @@ def validate_dependencies(root: Path) -> None:
         "CodeKit FFI Lua dependency identity mismatch",
     )
     require(
-        loader_version_match is not None and loader_version_match.group(1) == skill_version,
-        "CodeKit FFI Lua loader version must match skill.yaml version",
+        loader_version_match is not None and loader_version_match.group(1) == ffi_version,
+        "CodeKit FFI Lua loader version must match codekit-ffi Cargo version",
     )
     dependency_manifest = load_yaml(root / "dependencies.yaml")
     tools = dependency_manifest.get("tool_dependencies", [])
@@ -364,7 +399,7 @@ def validate_dependencies(root: Path) -> None:
         "The retired ast-grep-ffi dependency name must not remain in dependencies.yaml",
     )
     codekit_ffi = codekit_dependencies[0]
-    require(codekit_ffi.get("version") == skill_version, "codekit-ffi version must match skill.yaml version")
+    require(codekit_ffi.get("version") == ffi_version, "codekit-ffi dependency version must match codekit-ffi Cargo version")
     codekit_source = codekit_ffi.get("source", {})
     require(isinstance(codekit_source, dict), "codekit-ffi must declare one source object")
     codekit_github = codekit_source.get("github", {})
@@ -408,20 +443,63 @@ def validate_dependencies(root: Path) -> None:
 
 
 """
+Validate that a release reusing an older FFI version ships exactly that version's native sources.
+校验复用旧 FFI 版本的发布所携带的原生源码与该版本完全一致。
+
+A release whose FFI version equals the skill version builds and publishes the FFI assets itself.
+FFI 版本等于技能版本的发布会自行构建并发布 FFI 资产。
+
+Otherwise dependencies.yaml installs the assets from release v{ffi version}, so that tag must exist and
+codekit-ffi/ must be unchanged since it; any native change requires bumping the FFI version.
+否则 dependencies.yaml 会从 v{FFI 版本} 发布安装资产，因此该标签必须存在，且 codekit-ffi/ 自该标签以来
+不得有任何变更；任何原生改动都必须提升 FFI 版本。
+"""
+def validate_ffi_release_source(root: Path) -> None:
+    skill_version = str(load_yaml(root / "skill.yaml")["version"]).strip()
+    ffi_version = read_ffi_version(root)
+    if ffi_version == skill_version:
+        return
+
+    ffi_tag = f"v{ffi_version}"
+    tag_lookup = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--quiet", "--verify", f"refs/tags/{ffi_tag}^{{commit}}"],
+        capture_output=True,
+        text=True,
+    )
+    require(
+        tag_lookup.returncode == 0,
+        f"codekit-ffi {ffi_version} is reused, but its release tag {ffi_tag} does not exist locally",
+    )
+    native_diff = subprocess.run(
+        ["git", "-C", str(root), "diff", "--quiet", ffi_tag, "--", "codekit-ffi"],
+        capture_output=True,
+        text=True,
+    )
+    require(
+        native_diff.returncode == 0,
+        f"codekit-ffi/ changed since {ffi_tag}; bump the codekit-ffi version to the skill version to publish new native assets",
+    )
+
+
+"""
 Execute the repository validation flow and return one process exit code.
 执行仓库校验流程并返回进程退出码。
 """
 def main() -> int:
-    # Accept only the one machine-readable mode needed by release entrypoints.
-    # 仅接受发布入口所需的唯一机器可读模式。
+    # Accept only the machine-readable modes needed by release entrypoints.
+    # 仅接受发布入口所需的机器可读模式。
     command_arguments = sys.argv[1:]
-    if command_arguments not in ([], ["--print-version"]):
-        print("Usage: validate_skill.py [--print-version]")
+    supported_arguments = {"--print-version", "--release"}
+    if len(set(command_arguments)) != len(command_arguments) or not set(command_arguments) <= supported_arguments:
+        print("Usage: validate_skill.py [--release] [--print-version]")
         return 2
 
     # Keep normal validation output human-readable while allowing scripts to capture only the version.
     # 保持常规校验输出便于人工阅读，同时允许脚本仅捕获版本号。
-    print_version_only = command_arguments == ["--print-version"]
+    print_version_only = "--print-version" in command_arguments
+    # Release mode additionally checks the git history that backs a reused FFI version.
+    # 发布模式额外校验支撑复用 FFI 版本的 git 历史。
+    release_mode = "--release" in command_arguments
 
     # Resolve the repository once for every validation and version lookup.
     # 为全部校验与版本读取统一解析一次仓库路径。
@@ -431,6 +509,8 @@ def main() -> int:
         validate_manifest(root)
         validate_pwd_contracts(root)
         validate_dependencies(root)
+        if release_mode:
+            validate_ffi_release_source(root)
     except Exception as error:  # noqa: BLE001
         print(f"Validation failed: {error}")
         return 1

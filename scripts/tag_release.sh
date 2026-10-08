@@ -32,7 +32,7 @@ fi
 
 # Validate the complete contract and read the canonical version from one implementation.
 # 通过同一实现校验完整契约并读取规范版本。
-manifest_version="$(python scripts/validate_skill.py --print-version)"
+manifest_version="$(python scripts/validate_skill.py --release --print-version)"
 if [[ "$tag" != "v$manifest_version" ]]; then
   echo "Release tag $tag must match the validated repository version v$manifest_version"
   exit 1
