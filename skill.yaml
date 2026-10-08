@@ -1,10 +1,10 @@
 name: vulcan-codekit
-version: 0.2.3
+version: 0.2.4
 debug: false
 help:
   main:
-    description: Main Vulcan CodeKit help and workflow navigation.
-    file: help/vulcan_codekit_skill.lua
+    description: Structure-aware code navigation with repository maps, owner-aware search, exact function source, and whole-function patching.
+    file: help/main.md
   topics:
     - name: repo-map
       description: Repository-first directory tree and all-language code statistics workflow.
@@ -21,9 +21,9 @@ help:
     - name: node-source
       description: Function/method source extraction workflow that typically precedes whole-function patching by structural_path.
       file: help/node-source.md
-    - name: tree
-      description: Project structure mapping and candidate-file selection workflow.
-      file: help/tree.md
+    - name: ast-tree
+      description: Per-file AST map of one directory for candidate-file selection.
+      file: help/ast-tree.md
     - name: patch
       description: Safe whole-function replacement workflow paired with node-source output.
       file: help/patch.md
@@ -51,7 +51,7 @@ entries:
         description: "Optional. Disable ordinary .gitignore, .ignore, and .tokeignore rules only when true. CodeKit hard exclusions such as .git, target, node_modules, and dist remain active."
         required: false
   - name: ast-detail
-    description: "[FILE AST DETAIL] Inspect one or more exact source files and return plain Markdown AST details. Use this only after you already know the exact files, typically from codekit-ast-tree or codekit-rg."
+    description: "[FILE AST DETAIL] Inspect one or more exact source files and return plain Markdown AST details. Use this only after you already know the exact files, typically from vulcan-codekit-ast-tree or vulcan-codekit-rg."
     lua_entry: runtime/codekit-ast-detail.lua
     lua_module: codekit_ast_detail
     help: ast-detail
@@ -130,7 +130,7 @@ entries:
     description: "[DIRECTORY AST TREE] Pick candidate source files from exactly one directory before deep inspection. Returns a compact recursive Markdown tree grouped by subdirectory."
     lua_entry: runtime/codekit-ast-tree.lua
     lua_module: codekit_ast_tree
-    help: tree
+    help: ast-tree
     parameters:
       - name: PWD
         type: string
