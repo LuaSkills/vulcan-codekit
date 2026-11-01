@@ -8,8 +8,8 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
-import re
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,28 +26,28 @@ def repo_root() -> Path:
 
 
 """
-Read the exact top-level skill version without introducing a YAML runtime dependency.
-在不引入 YAML 运行时依赖的情况下读取精确顶层技能版本。
+Read the codekit-ffi crate version that the built library reports through its version symbols.
+读取已构建动态库通过版本符号报告的 codekit-ffi crate 版本。
+
+A skill release may reuse an earlier FFI release, so the library identity is the crate version; the
+release workflow only builds a new FFI when that version equals skill.yaml.
+技能发布可以复用较早的 FFI 发布，因此动态库身份是 crate 版本；发布 workflow 只在该版本等于
+skill.yaml 时构建新的 FFI。
 
 Parameters / 参数:
-- root: Repository root containing skill.yaml. / 包含 skill.yaml 的仓库根目录。
+- root: Repository root containing codekit-ffi/Cargo.toml. / 包含 codekit-ffi/Cargo.toml 的仓库根目录。
 
 Returns / 返回值:
-- str: Semantic version declared by skill.yaml. / skill.yaml 声明的语义化版本。
+- str: Semantic version declared by codekit-ffi/Cargo.toml. / codekit-ffi/Cargo.toml 声明的语义化版本。
 """
-def read_skill_version(root: Path) -> str:
-    # Match only the first top-level version declaration used by release automation.
-    # 仅匹配发布自动化使用的第一个顶层版本声明。
-    version_pattern = re.compile(r'^version:\s*["\']?([^"\'\s#]+)["\']?\s*(?:#.*)?$', re.MULTILINE)
-    # Read the authoritative manifest as UTF-8.
-    # 以 UTF-8 读取权威清单。
-    manifest_text = (root / "skill.yaml").read_text(encoding="utf-8")
-    # Resolve the exact version match before loading the native library.
-    # 在加载原生动态库前解析精确版本匹配。
-    version_match = version_pattern.search(manifest_text)
-    if version_match is None:
-        raise RuntimeError("skill.yaml does not declare a readable top-level version")
-    return version_match.group(1)
+def read_ffi_version(root: Path) -> str:
+    # Read the authoritative crate manifest as UTF-8 TOML.
+    # 以 UTF-8 TOML 读取权威 crate 清单。
+    manifest = tomllib.loads((root / "codekit-ffi" / "Cargo.toml").read_text(encoding="utf-8"))
+    version = manifest.get("package", {}).get("version")
+    if not isinstance(version, str) or not version:
+        raise RuntimeError("codekit-ffi/Cargo.toml does not declare a readable package version")
+    return version
 
 
 """
@@ -168,9 +168,9 @@ def run_smoke(library_path: Path, root: Path) -> None:
 
     # Require both version symbols to identify the same joint release.
     # 要求新旧版本符号标识同一个联合版本。
-    expected_version = read_skill_version(root)
-    require(unified_version().decode("utf-8") == expected_version, "unified FFI version does not match skill.yaml")
-    require(legacy_version().decode("utf-8") == expected_version, "legacy AST FFI version does not match skill.yaml")
+    expected_version = read_ffi_version(root)
+    require(unified_version().decode("utf-8") == expected_version, "unified FFI version does not match codekit-ffi/Cargo.toml")
+    require(legacy_version().decode("utf-8") == expected_version, "legacy AST FFI version does not match codekit-ffi/Cargo.toml")
 
     # Verify the discoverable native capability contract.
     # 验证可发现的原生能力契约。
