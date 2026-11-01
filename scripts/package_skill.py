@@ -111,6 +111,7 @@ def collect_package_paths(root: Path) -> list[Path]:
         "rules",
         "schemas",
         "skills",
+        "native",
     }
 
     collected: list[Path] = []
@@ -125,11 +126,41 @@ def collect_package_paths(root: Path) -> list[Path]:
 
 
 """
+Return every bundled dependency payload path declared by dependencies.yaml.
+返回 dependencies.yaml 声明的全部内置依赖载荷路径。
+"""
+def bundled_payload_paths(root: Path) -> list[str]:
+    with (root / "dependencies.yaml").open("r", encoding="utf-8") as handle:
+        manifest = yaml.safe_load(handle) or {}
+    paths: list[str] = []
+    for group_name in ("tool_dependencies", "lua_dependencies", "ffi_dependencies"):
+        for dependency in manifest.get(group_name, []) or []:
+            if dependency.get("source", {}).get("type") != "bundled":
+                continue
+            for package in dependency.get("packages", {}).values():
+                paths.append(package["path"])
+    return paths
+
+
+"""
+Fail before packaging when a bundled payload has not been staged into the skill directory.
+当内置载荷尚未暂存进技能目录时，在打包前失败。
+"""
+def require_bundled_payloads(root: Path) -> None:
+    missing = [path for path in bundled_payload_paths(root) if not (root / path).is_file()]
+    if missing:
+        raise RuntimeError(
+            "Bundled payloads are missing; run scripts/stage_native.py first: " + ", ".join(missing)
+        )
+
+
+"""
 Build the release zip and checksum file under the selected output directory.
 在选定输出目录下构建发布 zip 与校验文件。
 """
 def build_package(root: Path, out_dir: Path, version: str) -> tuple[Path, Path]:
     manifest = load_manifest(root)
+    require_bundled_payloads(root)
     archive_root = manifest_skill_id(manifest)
     package_stem = archive_root
 

@@ -50,41 +50,42 @@ ffi_dependencies:
     version: "0.2.3"
     required: true
     scope: skill
+    # The native libraries ship inside the skill package under native/{platform}/; the release
+    # workflow stages them with scripts/stage_native.py before packaging.
+    # 原生库随技能包分发，位于 native/{platform}/；发布 workflow 在打包前用 scripts/stage_native.py 暂存。
     source:
-      type: github_release
-      github:
-        repo: LuaSkills/vulcan-codekit
+      type: bundled
     packages:
       windows-x64:
-        archive_type: zip
-        asset_name: codekit-ffi-windows-x64.zip
+        archive_type: raw
+        path: native/windows-x64/vulcan_codekit_ffi.dll
         exports:
           - archive_path: vulcan_codekit_ffi.dll
             target_path: lib/vulcan_codekit_ffi.dll
       linux-x64:
-        archive_type: zip
-        asset_name: codekit-ffi-linux-x64.zip
+        archive_type: raw
+        path: native/linux-x64/libvulcan_codekit_ffi.so
         exports:
           - archive_path: libvulcan_codekit_ffi.so
             target_path: lib/libvulcan_codekit_ffi.so
             executable: true
       linux-arm64:
-        archive_type: zip
-        asset_name: codekit-ffi-linux-arm64.zip
+        archive_type: raw
+        path: native/linux-arm64/libvulcan_codekit_ffi.so
         exports:
           - archive_path: libvulcan_codekit_ffi.so
             target_path: lib/libvulcan_codekit_ffi.so
             executable: true
       macos-arm64:
-        archive_type: zip
-        asset_name: codekit-ffi-macos-arm64.zip
+        archive_type: raw
+        path: native/macos-arm64/libvulcan_codekit_ffi.dylib
         exports:
           - archive_path: libvulcan_codekit_ffi.dylib
             target_path: lib/libvulcan_codekit_ffi.dylib
             executable: true
       macos-x64:
-        archive_type: zip
-        asset_name: codekit-ffi-macos-x64.zip
+        archive_type: raw
+        path: native/macos-x64/libvulcan_codekit_ffi.dylib
         exports:
           - archive_path: libvulcan_codekit_ffi.dylib
             target_path: lib/libvulcan_codekit_ffi.dylib

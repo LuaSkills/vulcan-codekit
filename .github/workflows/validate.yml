@@ -50,14 +50,43 @@ jobs:
       - name: Verify RG matches inside and outside indexed AST ranges
         run: lua5.4 ./scripts/verify_rg_matches.lua
 
+      # A reused codekit-ffi version is bundled from its published release; a new FFI version has no
+      # published assets yet, so its complete package is only produced by the release workflow.
+      # 复用的 codekit-ffi 版本从其已发布的 Release 内置；新 FFI 版本尚无发布资产，完整技能包只由发布 workflow 生成。
+      - name: Decide whether the bundled skill package can be smoke-tested
+        id: bundle
+        shell: python
+        run: |
+          import os
+          import tomllib
+          from pathlib import Path
+
+          import yaml
+
+          skill_version = str(yaml.safe_load(Path("skill.yaml").read_text(encoding="utf-8"))["version"])
+          ffi_version = tomllib.loads(Path("codekit-ffi/Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+          reused = "true" if ffi_version != skill_version else "false"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"reused={reused}\n")
+          if reused == "false":
+              print(f"codekit-ffi {ffi_version} is new in this skill version; the release workflow builds the bundled package.")
+
+      - name: Stage bundled native libraries from the reused release
+        if: steps.bundle.outputs.reused == 'true'
+        run: python ./scripts/stage_native.py --from-release
+
       - name: Package LuaSkill release path smoke
+        if: steps.bundle.outputs.reused == 'true'
         run: python ./scripts/package_skill.py --out-dir dist-skill-smoke
 
       - name: Check LuaSkill archive root
+        if: steps.bundle.outputs.reused == 'true'
         shell: python
         run: |
           from pathlib import Path
           from zipfile import ZipFile
+
+          import yaml
 
           package_path = next(Path("dist-skill-smoke").glob("vulcan-codekit-v*-skill.zip"))
           with ZipFile(package_path) as archive:
@@ -71,6 +100,16 @@ jobs:
               raise SystemExit("LuaSkill package must contain the schemas/ directory contents")
           if "vulcan-codekit/runtime/codekit-path.lua" not in names:
               raise SystemExit("LuaSkill package must contain the shared host-managed PWD path module")
+
+          # Every bundled payload declared by dependencies.yaml must be inside the package.
+          # dependencies.yaml 声明的每个内置载荷都必须在包内。
+          manifest = yaml.safe_load(Path("dependencies.yaml").read_text(encoding="utf-8"))
+          for dependency in manifest.get("ffi_dependencies", []):
+              if dependency.get("source", {}).get("type") != "bundled":
+                  continue
+              for platform, package in dependency["packages"].items():
+                  if f"vulcan-codekit/{package['path']}" not in names:
+                      raise SystemExit(f"LuaSkill package is missing bundled payload for {platform}: {package['path']}")
 
       - name: Check unified CodeKit FFI dependency licenses
         run: cargo deny --config deny.toml --exclude-dev check licenses

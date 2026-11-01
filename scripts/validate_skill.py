@@ -402,33 +402,33 @@ def validate_dependencies(root: Path) -> None:
     require(codekit_ffi.get("version") == ffi_version, "codekit-ffi dependency version must match codekit-ffi Cargo version")
     codekit_source = codekit_ffi.get("source", {})
     require(isinstance(codekit_source, dict), "codekit-ffi must declare one source object")
-    codekit_github = codekit_source.get("github", {})
-    require(codekit_source.get("type") == "github_release", "codekit-ffi must install from GitHub Release")
-    require(isinstance(codekit_github, dict), "codekit-ffi github_release source must declare github config")
-    require(
-        codekit_github.get("repo") == "LuaSkills/vulcan-codekit",
-        "codekit-ffi must point to the current GitHub release repository",
-    )
+    # The native libraries travel inside the skill package, so installation never downloads them.
+    # 原生库随技能包分发，因此安装时不再下载。
+    require(codekit_source == {"type": "bundled"}, "codekit-ffi must use exactly a bundled source")
     packages = codekit_ffi.get("packages", {})
     require(isinstance(packages, dict) and packages, "codekit-ffi must declare platform packages")
-    # Map each required platform to its exact release asset and dynamic-library filename.
-    # 将每个必需平台映射到精确发布资产与动态库文件名。
+    # Map each required platform to its exact dynamic-library filename and executable flag.
+    # 将每个必需平台映射到精确动态库文件名与可执行标记。
     expected_packages = {
-        "windows-x64": ("codekit-ffi-windows-x64.zip", "vulcan_codekit_ffi.dll", False),
-        "linux-x64": ("codekit-ffi-linux-x64.zip", "libvulcan_codekit_ffi.so", True),
-        "linux-arm64": ("codekit-ffi-linux-arm64.zip", "libvulcan_codekit_ffi.so", True),
-        "macos-arm64": ("codekit-ffi-macos-arm64.zip", "libvulcan_codekit_ffi.dylib", True),
-        "macos-x64": ("codekit-ffi-macos-x64.zip", "libvulcan_codekit_ffi.dylib", True),
+        "windows-x64": ("vulcan_codekit_ffi.dll", False),
+        "linux-x64": ("libvulcan_codekit_ffi.so", True),
+        "linux-arm64": ("libvulcan_codekit_ffi.so", True),
+        "macos-arm64": ("libvulcan_codekit_ffi.dylib", True),
+        "macos-x64": ("libvulcan_codekit_ffi.dylib", True),
     }
     require(set(packages) == set(expected_packages), "codekit-ffi packages must match the supported release matrix exactly")
     for platform_name in expected_packages:
         require(platform_name in packages, f"codekit-ffi missing package for {platform_name}")
-        # Validate the exact asset and first exported library path used by LuaSkills installation.
-        # 校验 LuaSkills 安装使用的精确资产与第一个导出动态库路径。
+        # Validate the exact bundled payload and exported library path used by LuaSkills installation.
+        # 校验 LuaSkills 安装使用的精确内置载荷与导出动态库路径。
         package = packages[platform_name]
-        expected_asset, expected_library, expected_executable = expected_packages[platform_name]
-        require(package.get("asset_name") == expected_asset, f"codekit-ffi asset mismatch for {platform_name}")
-        require(package.get("archive_type") == "zip", f"codekit-ffi archive type mismatch for {platform_name}")
+        expected_library, expected_executable = expected_packages[platform_name]
+        require(
+            package.get("path") == f"native/{platform_name}/{expected_library}",
+            f"codekit-ffi bundled path mismatch for {platform_name}",
+        )
+        require(package.get("archive_type") == "raw", f"codekit-ffi archive type mismatch for {platform_name}")
+        require("asset_name" not in package, f"codekit-ffi bundled package must not declare asset_name for {platform_name}")
         exports = package.get("exports")
         require(isinstance(exports, list) and len(exports) == 1, f"codekit-ffi must export one library for {platform_name}")
         export = exports[0]
@@ -449,9 +449,9 @@ Validate that a release reusing an older FFI version ships exactly that version'
 A release whose FFI version equals the skill version builds and publishes the FFI assets itself.
 FFI 版本等于技能版本的发布会自行构建并发布 FFI 资产。
 
-Otherwise dependencies.yaml installs the assets from release v{ffi version}, so that tag must exist and
+Otherwise packaging bundles the assets published by release v{ffi version}, so that tag must exist and
 codekit-ffi/ must be unchanged since it; any native change requires bumping the FFI version.
-否则 dependencies.yaml 会从 v{FFI 版本} 发布安装资产，因此该标签必须存在，且 codekit-ffi/ 自该标签以来
+否则打包时会内置 v{FFI 版本} 发布的资产，因此该标签必须存在，且 codekit-ffi/ 自该标签以来
 不得有任何变更；任何原生改动都必须提升 FFI 版本。
 """
 def validate_ffi_release_source(root: Path) -> None:

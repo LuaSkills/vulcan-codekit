@@ -229,9 +229,9 @@ jobs:
             throw "codekit-ffi dependency version $dependencyVersion must match codekit-ffi Cargo version $ffiVersion"
           }
           # The FFI is versioned independently; only a release whose FFI version equals the skill version
-          # builds native assets, otherwise dependencies.yaml installs them from release v{ffi version}.
-          # FFI 独立版本化；只有 FFI 版本等于技能版本的发布才构建原生资产，否则 dependencies.yaml
-          # 从 v{FFI 版本} 发布安装原生资产。
+          # builds native assets, otherwise packaging bundles the assets of release v{ffi version}.
+          # FFI 独立版本化；只有 FFI 版本等于技能版本的发布才构建原生资产，否则打包时内置
+          # v{FFI 版本} 发布的原生资产。
           $buildFfi = $ffiVersion -eq $skillVersion
           $manifestTag = "v$skillVersion"
           if ($version -ne $manifestTag) {
@@ -324,10 +324,17 @@ jobs:
 
   build-luaskill:
     name: Build LuaSkill Package
+    # The skill package bundles the native libraries, so it is packaged after any FFI builds finish.
+    # 技能包内置原生库，因此在全部 FFI 构建结束后才打包。
     needs:
       - prepare-release
       - validate-release
-    if: needs.prepare-release.outputs.build_luaskill == 'true'
+      - build-ffi
+    if: >-
+      always() &&
+      needs.prepare-release.outputs.build_luaskill == 'true' &&
+      needs.validate-release.result == 'success' &&
+      (needs.build-ffi.result == 'success' || needs.build-ffi.result == 'skipped')
     runs-on: >-
       ${{
         (startsWith(needs.prepare-release.outputs.luaskill_runner, 'ubuntu') || startsWith(needs.prepare-release.outputs.luaskill_runner, 'macos') || startsWith(needs.prepare-release.outputs.luaskill_runner, 'windows'))
@@ -350,6 +357,22 @@ jobs:
 
       - name: Validate strict skill layout
         run: python ./scripts/validate_skill.py
+
+      - name: Download native assets built by this release
+        if: needs.prepare-release.outputs.has_ffi_targets == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-ffi-*
+          path: ffi-assets
+          merge-multiple: true
+
+      - name: Stage native libraries built by this release
+        if: needs.prepare-release.outputs.has_ffi_targets == 'true'
+        run: python ./scripts/stage_native.py --asset-dir ffi-assets
+
+      - name: Stage native libraries from the reused codekit-ffi release
+        if: needs.prepare-release.outputs.has_ffi_targets != 'true'
+        run: python ./scripts/stage_native.py --from-release
 
       - name: Build skill package
         run: python ./scripts/package_skill.py
@@ -470,6 +493,6 @@ jobs:
 
             - Skill package assets follow the managed LuaSkill GitHub release naming rules.
             - This joint release includes the previously committed RG scale/diagnostic improvements and the new repository-first Repo Map workflow.
-            - Unified codekit-ffi assets provide compatible ast-grep scanning plus Tokei-powered repository statistics and are installed by dependencies.yaml from the release named by its codekit-ffi version.
+            - The skill package bundles the unified codekit-ffi libraries for every supported platform, so installing or updating it downloads no native assets.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

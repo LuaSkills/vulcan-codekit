@@ -390,8 +390,8 @@ This repository is the standalone source repository for the `vulcan-codekit` Lua
 
 This repository is no longer maintained as a demo skill. It is the release source for `vulcan-codekit`. Releases produce two types of artifacts:
 
-- LuaSkill package: includes `runtime/`, `rules/`, `schemas/`, `help/`, `skills/`, `dependencies.yaml`, and other runtime files
-- FFI component package: includes the platform-specific `vulcan_codekit_ffi` dynamic library
+- LuaSkill package: includes `runtime/`, `rules/`, `schemas/`, `help/`, `skills/`, `dependencies.yaml`, other runtime files, and `native/{platform}/` with the `vulcan_codekit_ffi` dynamic library for every supported platform
+- FFI component package: includes the platform-specific `vulcan_codekit_ffi` dynamic library; it is the verified source the skill package bundles from
 
 ## Dependencies and Release Artifacts
 
@@ -425,10 +425,11 @@ The top-level directory inside the zip archive must be the runtime skill name:
 
 - `vulcan-codekit/`
 
-`codekit-ffi` is not bundled into the skill package itself. It is installed as a GitHub Release dependency through `dependencies.yaml`. The current accurate Release repository is:
+`codekit-ffi` is bundled into the skill package. `dependencies.yaml` declares it with `source.type: bundled`, and each platform's `path` points at `native/{platform}/{library}` inside the package, so LuaSkills installs it from the package without any download (LuaSkills 0.7.0 or newer). `native/` is not committed: `scripts/stage_native.py` fills it from verified `codekit-ffi-{platform}.zip` assets before packaging, and `scripts/package_skill.py` refuses to package while any declared payload is missing:
 
-```yaml
-repo: LuaSkills/vulcan-codekit
+```powershell
+python .\scripts\stage_native.py --from-release        # assets of release v{FFI version}
+python .\scripts\stage_native.py --asset-dir ffi-assets # assets built locally or by the release workflow
 ```
 
 The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports tag pushes and manual rebuilds of an existing tag. It resolves and checks out the immutable tag before reading release metadata; the selected tag must match `v{tagged skill.yaml.version}`.
@@ -436,7 +437,7 @@ The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports tag pushe
 `codekit-ffi` is versioned independently of the skill. Its version lives in four places that must always agree: `codekit-ffi/Cargo.toml`, the `vulcan-codekit-ffi` entry in `codekit-ffi/Cargo.lock`, the `codekit-ffi` entry in `dependencies.yaml`, and `CODEKIT_FFI_VERSION` in `runtime/codekit-ffi.lua`. The FFI version may never be newer than the skill version:
 
 - Native change: bump the FFI version to the new skill version. That release builds and publishes the FFI assets.
-- Lua-only change: keep the FFI version. The release skips FFI builds, and installation keeps downloading the existing assets from release `v{FFI version}`, so a skill update does not re-download an unchanged native library.
+- Lua-only change: keep the FFI version. The release skips FFI builds and bundles the existing assets from release `v{FFI version}`; because the installed dependency root is keyed by the FFI version, a skill update keeps using the already installed native library.
 
 `python scripts/validate_skill.py --release` (run by the tag scripts and the release workflow) rejects a reused FFI version when its release tag is missing or `codekit-ffi/` has changed since that tag.
 
@@ -444,7 +445,7 @@ The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports tag pushe
 - `luaskill_runner`: runner used to build the skill package
 - Platform-specific `*_runner` values: runner for each FFI platform, or `off` to skip that platform
 
-LuaSkill package builds and FFI native component builds can be run separately. All enabled artifacts are uploaded to the same GitHub Release. Tag-triggered defaults build the LuaSkill, plus all five declared FFI platforms when the FFI version equals the skill version. The workflow stages artifacts first and creates or updates the Release only after every enabled validation/build job succeeds; in-flight tag builds are never cancelled. Unified native assets are named `codekit-ffi-{platform}.zip`; their checksums are named `codekit-ffi-{platform}.sha256.txt`. During runtime installation, the LuaSkills dependency manager resolves the matching asset from release `v{FFI version}` according to the `version`, `repo`, and platform `asset_name` values in `dependencies.yaml`.
+LuaSkill package builds and FFI native component builds can be run separately. All enabled artifacts are uploaded to the same GitHub Release. Tag-triggered defaults build the LuaSkill, plus all five declared FFI platforms when the FFI version equals the skill version. The skill package is built after the FFI jobs and bundles their libraries, or the assets of the reused FFI release. The workflow stages artifacts first and creates or updates the Release only after every enabled validation/build job succeeds; in-flight tag builds are never cancelled. Unified native assets are named `codekit-ffi-{platform}.zip`; their checksums are named `codekit-ffi-{platform}.sha256.txt`, and staging verifies every checksum before extracting the library.
 
 The Rust FFI dependency license report is generated automatically by `cargo-deny`:
 
