@@ -11,6 +11,10 @@ Returns the number of passed cases; any missing, duplicate, or unrelated hit rai
 -- 显式仓库位置，默认使用约定的工作目录。
 local repository_root = ... or "."
 
+-- Minimal host global for path helpers that read the platform; individual cases may swap in more APIs.
+-- 供读取平台信息的路径辅助函数使用的最小宿主全局对象；个别用例可替换为更多接口。
+vulcan = rawget(_G, "vulcan") or { os = { info = function() return { os = "linux" } end } }
+
 --[[
 Read an exact named upvalue without exposing test-only production APIs.
 读取精确命名的上值，避免在生产代码中暴露测试专用接口。
