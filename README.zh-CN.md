@@ -415,20 +415,23 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 ## 发布流程
 
-本仓库遵循 LuaSkills 的 GitHub Release 安装规则。技能包就是标准 LuaSkill 包，发布资产名称为：
+本仓库遵循 LuaSkills 的 GitHub Release 安装规则。自 0.2.8 起技能按分平台布局发布，每个系统只下载自身的原生库：
 
-- `vulcan-codekit-v{version}-skill.zip`
+- `vulcan-codekit-v{version}-{platform}-skill.zip`：`windows-x64`、`linux-x64`、`linux-arm64`、`macos-x64`、`macos-arm64` 各一个，只携带该系统的 `codekit-ffi` 库
+- `vulcan-codekit-v{version}-skill.zip`：携带全部库的全系统包，供 LuaSkills 0.8.0 之前的宿主使用
+- `vulcan-codekit-v{version}-packages.json`：包索引，LuaSkills 0.8.0 及以上据此为当前系统选包
 - `vulcan-codekit-v{version}-checksums.txt`
 
-压缩包内部的顶层目录必须是运行时技能名：
+每个压缩包内部的顶层目录都必须是运行时技能名：
 
 - `vulcan-codekit/`
 
-`codekit-ffi` 直接打进技能包。`dependencies.yaml` 以 `source.type: bundled` 声明，各平台 `path` 指向包内的 `native/{platform}/{动态库}`，LuaSkills 从技能包本身安装，不做任何下载（需要 LuaSkills 0.7.0 及以上）。`native/` 不入库：打包前由 `scripts/stage_native.py` 从经过校验的 `codekit-ffi-{platform}.zip` 资产填充，任一声明载荷缺失时 `scripts/package_skill.py` 拒绝打包：
+`codekit-ffi` 直接打进技能包。`dependencies.yaml` 以 `source.type: bundled` 声明，各平台 `path` 指向包内的 `native/{platform}/{动态库}`，LuaSkills 从技能包本身安装，不做任何下载（需要 LuaSkills 0.7.0 及以上）。`native/` 不入库：打包前由 `scripts/stage_native.py` 从经过校验的 `codekit-ffi-{platform}.zip` 资产填充。技能包由 [luaskills-debug](https://github.com/LuaSkills/luaskills-debug) 构建，任一声明载荷缺失时拒绝打包：
 
 ```powershell
 python .\scripts\stage_native.py --from-release        # 取 v{FFI 版本} 发布的资产
 python .\scripts\stage_native.py --asset-dir ffi-assets # 取本地或发布 workflow 构建的资产
+luaskills-debug package --skill-path . --out-dir dist --layout platform --include rules --include skills --include sgconfig.yml
 ```
 
 GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push，以及对一个已存在标签进行手动重建。workflow 会先解析并检出不可变标签，再读取发布元数据；所选标签必须与 `v{该标签内 skill.yaml.version}` 一致。
@@ -444,7 +447,7 @@ GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push，以及
 - `luaskill_runner`：技能包构建 runner
 - 各平台 `*_runner`：对应 FFI 平台 runner，设为 `off` 即跳过该平台
 
-LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；所有启用的产物都会上传到同一个 GitHub Release。标签自动触发时默认构建 LuaSkill；FFI 版本等于技能版本时还会构建声明的五个 FFI 平台。技能包在 FFI 任务之后打包，内置这些任务产出的动态库，或复用 FFI 版本对应发布的资产。workflow 会先暂存全部产物，只有所有启用的校验与构建任务成功后才创建或更新 Release，并且不会取消正在执行的标签构建。统一原生资产命名为 `codekit-ffi-{platform}.zip`，对应校验文件命名为 `codekit-ffi-{platform}.sha256.txt`，暂存时先逐一校验再解出动态库。
+LuaSkill 技能包构建和 FFI 原生组件构建可以分离执行；所有启用的产物都会上传到同一个 GitHub Release。标签自动触发时默认构建 LuaSkill；FFI 版本等于技能版本时还会构建声明的五个 FFI 平台。技能包在 FFI 任务之后由 `LuaSkills/luaskills-debug` Action 打包，内置这些任务产出的动态库，或复用 FFI 版本对应发布的资产。workflow 会先暂存全部产物，只有所有启用的校验与构建任务成功后才创建或更新 Release，并且不会取消正在执行的标签构建。统一原生资产命名为 `codekit-ffi-{platform}.zip`，对应校验文件命名为 `codekit-ffi-{platform}.sha256.txt`，暂存时先逐一校验再解出动态库。
 
 Rust FFI 依赖许可证报告由 `cargo-deny` 自动生成：
 

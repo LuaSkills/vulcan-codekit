@@ -77,7 +77,15 @@ jobs:
 
       - name: Package LuaSkill release path smoke
         if: steps.bundle.outputs.reused == 'true'
-        run: python ./scripts/package_skill.py --out-dir dist-skill-smoke
+        uses: LuaSkills/luaskills-debug@v0.8.0
+        with:
+          skill-id: vulcan-codekit
+          layout: platform
+          include: |
+            rules
+            skills
+            sgconfig.yml
+          out-dir: dist-skill-smoke
 
       - name: Check LuaSkill archive root
         if: steps.bundle.outputs.reused == 'true'
@@ -88,7 +96,12 @@ jobs:
 
           import yaml
 
-          package_path = next(Path("dist-skill-smoke").glob("vulcan-codekit-v*-skill.zip"))
+          # The all-systems package carries every bundled payload; each platform package carries only its own.
+          # 全系统包携带全部内置载荷；每个平台包只携带自身载荷。
+          version = str(yaml.safe_load(Path("skill.yaml").read_text(encoding="utf-8"))["version"])
+          package_path = Path(f"dist-skill-smoke/vulcan-codekit-v{version}-skill.zip")
+          if not Path(f"dist-skill-smoke/vulcan-codekit-v{version}-packages.json").is_file():
+              raise SystemExit("The platform layout must write the package index")
           with ZipFile(package_path) as archive:
               names = archive.namelist()
 

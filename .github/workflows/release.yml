@@ -374,8 +374,21 @@ jobs:
         if: needs.prepare-release.outputs.has_ffi_targets != 'true'
         run: python ./scripts/stage_native.py --from-release
 
-      - name: Build skill package
-        run: python ./scripts/package_skill.py
+      # The platform layout gives each system a package that carries only its own codekit-ffi library, plus the
+      # all-systems package for hosts older than LuaSkills 0.8.0 and the package index that 0.8.0 reads.
+      # 分平台布局为每个系统生成只携带自身 codekit-ffi 库的包，并附带供 LuaSkills 0.8.0 之前宿主使用的
+      # 全系统包，以及 0.8.0 读取的包索引。
+      - name: Build skill packages
+        uses: LuaSkills/luaskills-debug@v0.8.0
+        with:
+          skill-id: vulcan-codekit
+          layout: platform
+          include: |
+            rules
+            skills
+            sgconfig.yml
+          expect-tag: ${{ needs.prepare-release.outputs.version }}
+          out-dir: dist
 
       - name: Stage LuaSkill release assets
         uses: actions/upload-artifact@v4
@@ -493,6 +506,7 @@ jobs:
 
             - Skill package assets follow the managed LuaSkill GitHub release naming rules.
             - This joint release includes the previously committed RG scale/diagnostic improvements and the new repository-first Repo Map workflow.
-            - The skill package bundles the unified codekit-ffi libraries for every supported platform, so installing or updating it downloads no native assets.
+            - Each supported system has its own skill package that bundles only that system's codekit-ffi library; LuaSkills 0.8.0 or newer picks it through vulcan-codekit-${{ needs.prepare-release.outputs.version }}-packages.json.
+            - The all-systems package bundles every library for older hosts. No package downloads native assets at install time.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
