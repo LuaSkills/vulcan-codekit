@@ -1346,11 +1346,39 @@ local function render_codekit_error_markdown(tool_title, error_payload)
     }, "\n")
 end
 
--- 文件读取与 capture 提取 / Read current file content and decode ast-grep captures.
-local function read_file_state(file_path)
+--[[
+读取单个文件的当前内容与行拆分结果；同一 file_state_cache 内每个文件只读取一次。
+Read the current content and line split of one file; each file is read once per file_state_cache.
+
+参数 / Parameters:
+- file_path(string): 目标文件完整路径 / Full path of the target file.
+- file_state_cache(table|nil): 单次调用的文件状态缓存；传入时同路径复用同一份读取结果。
+  Per-call file state cache; when supplied, the same path reuses one read result.
+
+返回 / Returns:
+- table|nil: `{ raw = string, lines = table, line_count = number }`；读取失败时返回 nil 与错误文本。
+  `{ raw = string, lines = table, line_count = number }`, or nil plus the error text on read failure.
+
+一次 ast-grep 扫描会产生成千上万个匹配，而每个匹配都属于同一个文件。没有缓存时每次归一化都要
+重新读取并重新拆分整个文件，纯文本工作就按 匹配数 × 文件大小 增长。
+One ast-grep scan produces thousands of matches that all belong to the same file. Without a cache every
+normalization re-reads and re-splits the whole file, so plain text work grows with matches x file bytes.
+]]
+local function read_file_state(file_path, file_state_cache)
+    if file_state_cache then
+        local cached = file_state_cache[file_path]
+        if cached then
+            return cached.state, cached.error
+        end
+    end
+
     local ok, content = pcall(vulcan.fs.read, file_path)
     if not ok then
-        return nil, tostring(content)
+        local error_text = tostring(content)
+        if file_state_cache then
+            file_state_cache[file_path] = { state = nil, error = error_text }
+        end
+        return nil, error_text
     end
 
     local state = {
@@ -1358,6 +1386,9 @@ local function read_file_state(file_path)
         lines = split_lines(content or ""),
     }
     state.line_count = #state.lines
+    if file_state_cache then
+        file_state_cache[file_path] = { state = state, error = nil }
+    end
     return state
 end
 
@@ -1815,12 +1846,12 @@ local function extract_docstring(file_state, start_line, end_line, comment_confi
 end
 
 -- 结构归一化与建树 / Normalize matches into canonical symbols and assemble a nested tree.
-local function normalize_symbol(match, language_key)
+local function normalize_symbol(match, language_key, file_state_cache)
     if not match or not match.file then
         return nil
     end
 
-    local file_state = read_file_state(match.file)
+    local file_state = read_file_state(match.file, file_state_cache)
     if not file_state then
         return nil
     end
@@ -2344,13 +2375,16 @@ return function(args)
     end
 
     local normalized_by_file = {}
+    -- One file state cache per call keeps normalize_symbol from re-reading each scanned file per match.
+    -- 每次调用共用一份文件状态缓存，避免 normalize_symbol 按匹配重复读取同一文件。
+    local file_state_cache = {}
     for language_key, file_paths in pairs(grouped_files) do
         local matches, diagnostics = run_language_scan(scanner_client, nil, language_key, file_paths)
         if diagnostics and #diagnostics > 0 then
             table.insert(errors, { group = language_key, diagnostics = diagnostics })
         end
         for _, match in ipairs(matches or {}) do
-            local symbol = normalize_symbol(match, language_key)
+            local symbol = normalize_symbol(match, language_key, file_state_cache)
             if symbol then
                 normalized_by_file[symbol.file] = normalized_by_file[symbol.file] or {}
                 table.insert(normalized_by_file[symbol.file], symbol)

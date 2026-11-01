@@ -1086,8 +1086,11 @@ local function collect_ast_for_file(file_path, helper_bundle)
     end
 
     local normalized_symbols = {}
+    -- One cache for this single-file scan so the target file is read once for all of its matches.
+    -- 单文件扫描共用一份缓存，使目标文件针对其全部匹配只读取一次。
+    local file_state_cache = {}
     for _, match in ipairs(matches or {}) do
-        local symbol = helper_bundle.normalize_symbol(match, file_info.language)
+        local symbol = helper_bundle.normalize_symbol(match, file_info.language, file_state_cache)
         if symbol then
             table.insert(normalized_symbols, symbol)
         end

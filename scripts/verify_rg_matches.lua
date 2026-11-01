@@ -378,5 +378,44 @@ assert(unusual_markdown:gsub("\\(%p)", "%1"):find("D:\\[project]\\file`name.ts",
     "escaped path changed")
 passed = passed + 1
 
+-- AST admission must route large data-language files to direct RG output while keeping source files.
+-- AST 准入必须把大型数据语言文件转为直接 RG 输出，同时保留源码文件。
+local partition = required_upvalue(rg_entry, "partition_ast_enrichment_files")
+-- Read the production boundaries instead of defining second copies in the test.
+-- 读取生产边界，避免在测试中定义第二份取值。
+local data_limits = required_upvalue(partition, "MAX_AST_ENRICHMENT_DATA_FILE_BYTES")
+local source_limit = required_upvalue(partition, "MAX_AST_ENRICHMENT_FILE_BYTES")
+-- Exact file sizes served by the stubbed host stat API, keyed by fixture path.
+-- 由桩化宿主 stat 接口返回的精确文件大小，以夹具路径为键。
+local fixture_sizes = {
+    ["large.json"] = data_limits.json + 1,
+    ["small.json"] = data_limits.json,
+    ["large.yaml"] = data_limits.yaml + 1,
+    ["same-size.rs"] = data_limits.json + 1,
+}
+-- Previous host global restored after the case so later checks see the original environment.
+-- 用例结束后恢复先前的宿主全局对象，使后续检查看到原始环境。
+local previous_vulcan = rawget(_G, "vulcan")
+vulcan = { fs = { stat = function(path)
+    return { is_file = true, size = fixture_sizes[path] }
+end } }
+local admitted, skipped = partition({
+    { path = "large.json", language = "json" },
+    { path = "small.json", language = "json" },
+    { path = "large.yaml", language = "yaml" },
+    { path = "same-size.rs", language = "rust" },
+})
+vulcan = previous_vulcan
+-- Admitted and skipped paths keyed for order-independent comparison.
+-- 以路径为键的准入与跳过集合，便于与顺序无关地比较。
+local admitted_paths, skipped_reasons = {}, {}
+for _, file_info in ipairs(admitted) do admitted_paths[file_info.path] = true end
+for _, item in ipairs(skipped) do skipped_reasons[item.file_info.path] = item.reason end
+assert(admitted_paths["small.json"] and admitted_paths["same-size.rs"], "admissible file was skipped")
+assert(skipped_reasons["large.json"] == "file_size_limit_exceeded", "large JSON entered AST enrichment")
+assert(skipped_reasons["large.yaml"] == "file_size_limit_exceeded", "large YAML entered AST enrichment")
+assert(data_limits.json < source_limit, "data-language limit must be smaller than the source limit")
+passed = passed + 1
+
 print(string.format("RG match verification passed: %d cases.", passed))
 return passed

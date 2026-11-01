@@ -22,6 +22,19 @@ local MAX_AST_ENRICHMENT_TOTAL_BYTES = 8 * 1024 * 1024
 -- Maximum number of files admitted to synchronous AST enrichment for one RG call.
 -- 单次 RG 调用进入同步 AST 增强阶段时允许的文件数量上限。
 local MAX_AST_ENRICHMENT_FILES = 100
+-- Per-file byte limits for data languages whose rules index every key/value pair.
+-- One JSON/YAML pair per line turns a few hundred KiB into tens of thousands of symbols,
+-- so these languages use a much smaller per-file boundary than source code.
+-- 数据语言的单文件字节上限；其规则为每个键值对建立索引。JSON/YAML 每行一个键值对，
+-- 几百 KiB 就会产生数万个符号，因此这些语言使用远小于源码的单文件边界。
+local MAX_AST_ENRICHMENT_DATA_FILE_BYTES = {
+    json = 256 * 1024,
+    yaml = 256 * 1024,
+}
+-- Wall-clock budget, in whole seconds, for the complete AST enrichment stage of one RG call.
+-- Files not started before the deadline fall back to direct RG output instead of running unbounded.
+-- 单次 RG 调用整个 AST 增强阶段的墙钟预算（整秒）；截止前未开始的文件回退为直接 RG 输出，不再无界运行。
+local MAX_AST_ENRICHMENT_SECONDS = 15
 local LFS_MODULE = nil
 local SHARED_LENGTH_HELPERS = nil
 
@@ -1314,6 +1327,10 @@ local function partition_ast_enrichment_files(files)
         -- Exact file size retained for diagnostics when metadata is available.
         -- 元数据可用时为诊断保留的精确文件大小。
         local file_size = nil
+        -- Per-file limit that applies to this file's language, reported in diagnostics.
+        -- Data languages index every pair, so their boundary is far smaller than source code.
+        -- 适用于该文件语言的单文件上限，并在诊断中报告；数据语言为每个键值对建立索引，因此边界远小于源码。
+        local per_file_limit = MAX_AST_ENRICHMENT_DATA_FILE_BYTES[file_info.language] or MAX_AST_ENRICHMENT_FILE_BYTES
 
         if not stat_ok then
             skip_reason = "file_stat_failed"
@@ -1323,7 +1340,7 @@ local function partition_ast_enrichment_files(files)
             skip_reason = "file_size_unavailable"
         else
             file_size = metadata_or_error.size
-            if file_size > MAX_AST_ENRICHMENT_FILE_BYTES then
+            if file_size > per_file_limit then
                 skip_reason = "file_size_limit_exceeded"
             elseif #admitted_files >= MAX_AST_ENRICHMENT_FILES then
                 skip_reason = "file_count_limit_exceeded"
@@ -1345,7 +1362,7 @@ local function partition_ast_enrichment_files(files)
                     skip_reason,
                     tostring(file_info.display_file or file_info.path),
                     file_size and tostring(file_size) or "unknown",
-                    MAX_AST_ENRICHMENT_FILE_BYTES,
+                    per_file_limit,
                     MAX_AST_ENRICHMENT_TOTAL_BYTES,
                     MAX_AST_ENRICHMENT_FILES
                 )
@@ -1707,7 +1724,6 @@ return function(args)
             enrichment_bytes
         )
     )
-    local grouped_files = {}
     local aggregated_errors = clone_array(collection_errors or {})
     if #enrichment_diagnostics > 0 then
         table.insert(aggregated_errors, {
@@ -1715,44 +1731,83 @@ return function(args)
             diagnostics = enrichment_diagnostics,
         })
     end
-    for _, file_info in ipairs(enrichment_files) do
-        grouped_files[file_info.language] = grouped_files[file_info.language] or {}
-        table.insert(grouped_files[file_info.language], file_info.path)
-    end
 
     local normalized_by_file = {}
-    for language_key, file_paths in pairs(grouped_files) do
-        log_rg_stage(
-            "ast_scan",
-            "started",
-            string.format("language=%s files=%d", tostring(language_key), #file_paths)
-        )
-        local matches, match_diagnostics = helper_bundle.run_language_scan(scanner_client, nil, language_key, file_paths)
-        log_rg_stage(
-            "ast_scan",
-            "completed",
-            string.format(
-                "language=%s files=%d matches=%d diagnostics=%d",
-                tostring(language_key),
-                #file_paths,
-                #(matches or {}),
-                #(match_diagnostics or {})
+    -- Shared file state cache so one scanned file is read once instead of once per match.
+    -- 共享文件状态缓存，使单个被扫描文件只读取一次，而不是每个匹配读取一次。
+    local file_state_cache = {}
+    -- Files that actually completed AST enrichment; the rest are rendered from direct RG hits.
+    -- 实际完成 AST 增强的文件；其余文件使用直接 RG 命中渲染。
+    local enriched_files = {}
+    -- Files whose enrichment never started because the stage deadline had passed.
+    -- 因阶段截止时间已过而未开始增强的文件。
+    local deadline_skipped_files = {}
+    -- Deadline for starting another file's enrichment, in whole seconds of wall-clock time.
+    -- 开始下一个文件增强的截止时间（墙钟整秒）。
+    local enrichment_deadline = os.time() + MAX_AST_ENRICHMENT_SECONDS
+    -- Scan one file per FFI call so the deadline is checked between files rather than per language group.
+    -- 每次 FFI 调用只扫描一个文件，使截止时间在文件之间检查，而非每个语言组检查一次。
+    for _, file_info in ipairs(enrichment_files) do
+        if os.time() >= enrichment_deadline then
+            table.insert(deadline_skipped_files, { file_info = file_info, reason = "time_budget_exceeded" })
+        else
+            local language_key = file_info.language
+            log_rg_stage(
+                "ast_scan",
+                "started",
+                string.format("language=%s files=1", tostring(language_key))
             )
-        )
-        if match_diagnostics and #match_diagnostics > 0 then
-            table.insert(aggregated_errors, { group = language_key, diagnostics = match_diagnostics })
-        end
-        for _, match in ipairs(matches or {}) do
-            local symbol = helper_bundle.normalize_symbol(match, language_key)
-            if symbol then
-                normalized_by_file[symbol.file] = normalized_by_file[symbol.file] or {}
-                table.insert(normalized_by_file[symbol.file], symbol)
+            local matches, match_diagnostics =
+                helper_bundle.run_language_scan(scanner_client, nil, language_key, { file_info.path })
+            log_rg_stage(
+                "ast_scan",
+                "completed",
+                string.format(
+                    "language=%s files=1 matches=%d diagnostics=%d",
+                    tostring(language_key),
+                    #(matches or {}),
+                    #(match_diagnostics or {})
+                )
+            )
+            if match_diagnostics and #match_diagnostics > 0 then
+                table.insert(aggregated_errors, { group = language_key, diagnostics = match_diagnostics })
             end
+            for _, match in ipairs(matches or {}) do
+                local symbol = helper_bundle.normalize_symbol(match, language_key, file_state_cache)
+                if symbol then
+                    normalized_by_file[symbol.file] = normalized_by_file[symbol.file] or {}
+                    table.insert(normalized_by_file[symbol.file], symbol)
+                end
+            end
+            -- Release the cached text once this file's matches are normalized.
+            -- 该文件的匹配归一化完成后释放缓存文本。
+            file_state_cache[file_info.path] = nil
+            table.insert(enriched_files, file_info)
         end
+    end
+    if #deadline_skipped_files > 0 then
+        -- Diagnostics for files that fell back to direct RG output because of the stage deadline.
+        -- 因阶段截止时间回退为直接 RG 输出的文件诊断。
+        local deadline_diagnostics = {}
+        for _, skipped in ipairs(deadline_skipped_files) do
+            table.insert(
+                deadline_diagnostics,
+                string.format(
+                    "time_budget_exceeded: path=%s time_limit_seconds=%d",
+                    tostring(skipped.file_info.display_file or skipped.file_info.path),
+                    MAX_AST_ENRICHMENT_SECONDS
+                )
+            )
+            table.insert(skipped_enrichment_files, skipped)
+        end
+        table.insert(aggregated_errors, {
+            group = "ast_enrichment_skipped",
+            diagnostics = deadline_diagnostics,
+        })
     end
 
     local render_contexts = {}
-    for _, file_info in ipairs(enrichment_files) do
+    for _, file_info in ipairs(enriched_files) do
         local file_hits = hits_by_canonical_file[normalize_path_key(file_info.path)] or {}
         local symbols = helper_bundle.deduplicate_symbols(normalized_by_file[file_info.path] or {})
         table.insert(render_contexts, {

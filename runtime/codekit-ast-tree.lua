@@ -717,11 +717,14 @@ return function(args)
     end
 
     local normalized_by_file = {}
+    -- Shared file state cache for every symbol normalized by this call.
+    -- 本次调用归一化的每个符号共用的文件状态缓存。
+    local file_state_cache = {}
     for language_key, file_paths in pairs(grouped_files) do
         local matches, diagnostics = helpers.run_language_scan(scanner_client, nil, language_key, file_paths)
         log_diagnostics(diagnostics)
         for _, match in ipairs(matches or {}) do
-            local symbol = helpers.normalize_symbol(match, language_key)
+            local symbol = helpers.normalize_symbol(match, language_key, file_state_cache)
             if symbol then
                 normalized_by_file[symbol.file] = normalized_by_file[symbol.file] or {}
                 table.insert(normalized_by_file[symbol.file], symbol)
