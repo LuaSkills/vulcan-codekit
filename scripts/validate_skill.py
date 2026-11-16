@@ -378,12 +378,18 @@ def validate_dependencies(root: Path) -> None:
     dependency_manifest = load_yaml(root / "dependencies.yaml")
     tools = dependency_manifest.get("tool_dependencies", [])
     require(isinstance(tools, list), "tool_dependencies must be a YAML list")
-    require(any(item.get("name") == "rg" for item in tools if isinstance(item, dict)), "CodeKit must declare one rg dependency")
-    rg_dependency = next(item for item in tools if isinstance(item, dict) and item.get("name") == "rg")
+    # Require one bundled declaration so dependency preparation can run without GitHub.
+    # 要求唯一的内置依赖声明，使依赖准备无需访问 GitHub。
+    rg_dependencies = [item for item in tools if isinstance(item, dict) and item.get("name") == "rg"]
+    require(len(rg_dependencies) == 1, "CodeKit must declare exactly one rg dependency")
+    rg_dependency = rg_dependencies[0]
+    require(rg_dependency.get("source") == {"type": "bundled"}, "rg must use exactly a bundled source")
+    require(rg_dependency.get("scope") == "skill", "rg must remain skill-private")
+    require(rg_dependency.get("required") is True, "rg must remain required")
+    rg_version = rg_dependency.get("version")
+    require(isinstance(rg_version, str) and is_valid_semver(rg_version), "rg must pin a release version")
     rg_packages = rg_dependency.get("packages", {})
     require(isinstance(rg_packages, dict) and rg_packages, "rg must declare platform packages")
-    for platform_name in ("windows-x64", "linux-x64", "linux-arm64", "macos-arm64", "macos-x64"):
-        require(platform_name in rg_packages, f"rg missing package for {platform_name}")
     require(not any(item.get("name") == "ast-grep" for item in tools if isinstance(item, dict)), "ast-grep must be provided as an FFI dependency, not as a CLI tool dependency")
 
     lua_dependencies = dependency_manifest.get("lua_dependencies", [])
@@ -416,6 +422,35 @@ def validate_dependencies(root: Path) -> None:
         "macos-arm64": ("libvulcan_codekit_ffi.dylib", True),
         "macos-x64": ("libvulcan_codekit_ffi.dylib", True),
     }
+    require(set(rg_packages) == set(expected_packages), "rg packages must match the supported release matrix exactly")
+    for platform_name, rg_package in rg_packages.items():
+        # Windows ships a ZIP and rg.exe. Unix ships a tarball and installs rg with execute permissions.
+        # Windows 分发 ZIP 和 rg.exe，Unix 分发 tarball 并为安装后的 rg 设置执行权限。
+        windows = platform_name == "windows-x64"
+        archive_type, suffix, binary = ("zip", ".zip", "rg.exe") if windows else ("tar_gz", ".tar.gz", "rg")
+        require(rg_package.get("archive_type") == archive_type, f"rg archive type mismatch for {platform_name}")
+        # The staged archive path doubles as its upstream asset name.
+        # 暂存的归档路径同时提供上游资产文件名。
+        path = str(rg_package.get("path", ""))
+        asset = Path(path).name
+        require(
+            path == f"native/{platform_name}/{asset}" and asset.startswith(f"ripgrep-{rg_version}-") and asset.endswith(suffix),
+            f"rg bundled archive path mismatch for {platform_name}",
+        )
+        require(
+            re.fullmatch(r"[0-9a-f]{64}", str(rg_package.get("sha256", ""))) is not None,
+            f"rg must pin a SHA-256 digest for {platform_name}",
+        )
+        require("asset_name" not in rg_package, f"rg bundled package must not declare asset_name for {platform_name}")
+        # Preserve the private bin/ layout consumed by the CodeKit tools.
+        # 保留 CodeKit 工具消费的私有 bin/ 目录布局。
+        expected_export = {
+            "archive_path": f"{asset.removesuffix(suffix).replace(rg_version, '{version}', 1)}/{binary}",
+            "target_path": f"bin/{binary}",
+        }
+        if not windows:
+            expected_export["executable"] = True
+        require(rg_package.get("exports") == [expected_export], f"rg export mismatch for {platform_name}")
     require(set(packages) == set(expected_packages), "codekit-ffi packages must match the supported release matrix exactly")
     for platform_name in expected_packages:
         require(platform_name in packages, f"codekit-ffi missing package for {platform_name}")

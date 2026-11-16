@@ -397,7 +397,7 @@ This repository is no longer maintained as a demo skill. It is the release sourc
 
 `dependencies.yaml` declares runtime dependencies. Current dependencies are split into two categories:
 
-- `rg`: still provided as a tool dependency for text search and Markdown file enumeration
+- `rg`: bundled as a skill-private tool dependency for text search and Markdown file enumeration
 - `codekit-ffi`: provided as one FFI dependency for AST structure scanning, structural matching, patch validation, and Tokei-powered Repo Map statistics
 
 The current implementation calls neither the raw `ast-grep` CLI nor a `tokei` executable. Both capabilities are Rust library dependencies inside the dynamic library built from `codekit-ffi/`. The Lua runtime loads the platform-specific dynamic library from the FFI dependency directory injected by LuaSkills. During local development, it also checks the exact `codekit-ffi/target/release` and `codekit-ffi/target/debug` paths.
@@ -416,10 +416,10 @@ The `windows-arm64` component is not published for now, and that platform is not
 
 ## Release Flow
 
-This repository follows the GitHub Release installation rules used by LuaSkills. Since 0.2.8 the skill is released in the platform layout, so each system downloads only its own native library:
+This repository follows the GitHub Release installation rules used by LuaSkills. The platform layout gives each supported system its own FFI library and ripgrep archive:
 
-- `vulcan-codekit-v{version}-{platform}-skill.zip` for `windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64` and `macos-arm64`, each carrying only that system's `codekit-ffi` library
-- `vulcan-codekit-v{version}-skill.zip`, the all-systems package with every library, for hosts older than LuaSkills 0.8.0
+- `vulcan-codekit-v{version}-{platform}-skill.zip` for `windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64` and `macos-arm64`, each carrying its own `codekit-ffi` library and ripgrep archive
+- `vulcan-codekit-v{version}-skill.zip`, the all-systems package with dependencies for all supported platforms, for hosts older than LuaSkills 0.8.0
 - `vulcan-codekit-v{version}-packages.json`, the package index that LuaSkills 0.8.0 or newer reads to pick the package for the current system
 - `vulcan-codekit-v{version}-checksums.txt`
 
@@ -427,7 +427,7 @@ The top-level directory inside every zip archive must be the runtime skill name:
 
 - `vulcan-codekit/`
 
-`codekit-ffi` is bundled into the skill packages. `dependencies.yaml` declares it with `source.type: bundled`, and each platform's `path` points at `native/{platform}/{library}` inside the package, so LuaSkills installs it from the package without any download (LuaSkills 0.7.0 or newer). `native/` is not committed: `scripts/stage_native.py` fills it from verified `codekit-ffi-{platform}.zip` assets before packaging. [luaskills-debug](https://github.com/LuaSkills/luaskills-debug) builds the packages and refuses to package while any declared payload is missing:
+`dependencies.yaml` declares both dependencies as `source.type: bundled`. LuaSkills installs them directly from each skill package. Before packaging, `scripts/stage_native.py` stages the FFI libraries and downloads the pinned ripgrep release archives to `native/{platform}/`. The script verifies each archive and preserves the original ripgrep license files. [luaskills-debug](https://github.com/LuaSkills/luaskills-debug) requires every declared payload when building the packages:
 
 ```powershell
 python .\scripts\stage_native.py --from-release        # assets of release v{FFI version}

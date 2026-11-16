@@ -66,7 +66,7 @@
 
 - `ripgrep` 官方声明其项目采用 `Unlicense` 与 `MIT License` 双许可证发布，使用者可以任选其一遵循。
 - 若按 MIT License 路径使用或分发，应保留对应版权声明与许可声明。
-- 若随本 skill 包分发 `rg` 或 `rg.exe`，建议一并附带上游 `COPYING`、`LICENSE-MIT` 与 `UNLICENSE` 的原始说明文件或等效许可证归档材料。
+- 技能包按平台携带未经改动的上游 ripgrep 发布归档，其中包含 `COPYING`、`LICENSE-MIT` 与 `UNLICENSE`。
 
 ## 4. 包内落地要求
 

@@ -396,7 +396,7 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 `dependencies.yaml` 负责声明运行时依赖。当前依赖分为两类：
 
-- `rg`：仍作为工具依赖提供文本搜索与 Markdown 文件枚举能力
+- `rg`：作为内置的技能私有工具依赖，提供文本搜索与 Markdown 文件枚举能力
 - `codekit-ffi`：作为统一 FFI 依赖提供 AST 结构扫描、结构匹配、patch 校验与基于 Tokei 的 Repo Map 统计
 
 当前既不调用原始 `ast-grep` CLI，也不调用外部 `tokei` 可执行文件；两项能力都以 Rust 库依赖集成在 `codekit-ffi/` 构建出的统一动态库中。Lua 运行时代码会从 LuaSkills 注入的 FFI 依赖目录加载对应平台的动态库；本地开发时只检查精确的 `codekit-ffi/target/release` 与 `codekit-ffi/target/debug` 路径。
@@ -415,10 +415,10 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 ## 发布流程
 
-本仓库遵循 LuaSkills 的 GitHub Release 安装规则。自 0.2.8 起技能按分平台布局发布，每个系统只下载自身的原生库：
+本仓库遵循 LuaSkills 的 GitHub Release 安装规则。每个平台有各自的技能包，携带对应的 FFI 动态库和 ripgrep 归档：
 
-- `vulcan-codekit-v{version}-{platform}-skill.zip`：`windows-x64`、`linux-x64`、`linux-arm64`、`macos-x64`、`macos-arm64` 各一个，只携带该系统的 `codekit-ffi` 库
-- `vulcan-codekit-v{version}-skill.zip`：携带全部库的全系统包，供 LuaSkills 0.8.0 之前的宿主使用
+- `vulcan-codekit-v{version}-{platform}-skill.zip`：`windows-x64`、`linux-x64`、`linux-arm64`、`macos-x64`、`macos-arm64` 各一个，携带对应的 `codekit-ffi` 库和 ripgrep 归档
+- `vulcan-codekit-v{version}-skill.zip`：携带所有已支持平台依赖的全系统包，供 LuaSkills 0.8.0 之前的宿主使用
 - `vulcan-codekit-v{version}-packages.json`：包索引，LuaSkills 0.8.0 及以上据此为当前系统选包
 - `vulcan-codekit-v{version}-checksums.txt`
 
@@ -426,7 +426,7 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 - `vulcan-codekit/`
 
-`codekit-ffi` 直接打进技能包。`dependencies.yaml` 以 `source.type: bundled` 声明，各平台 `path` 指向包内的 `native/{platform}/{动态库}`，LuaSkills 从技能包本身安装，不做任何下载（需要 LuaSkills 0.7.0 及以上）。`native/` 不入库：打包前由 `scripts/stage_native.py` 从经过校验的 `codekit-ffi-{platform}.zip` 资产填充。技能包由 [luaskills-debug](https://github.com/LuaSkills/luaskills-debug) 构建，任一声明载荷缺失时拒绝打包：
+`dependencies.yaml` 以 `source.type: bundled` 声明这两项依赖，LuaSkills 直接从技能包安装。打包前，`scripts/stage_native.py` 将 FFI 动态库和锁定版本的 ripgrep 上游归档暂存到 `native/{platform}/`，校验每份归档并保留 ripgrep 的原始许可证文件。技能包由 [luaskills-debug](https://github.com/LuaSkills/luaskills-debug) 构建，任一声明载荷缺失时拒绝打包：
 
 ```powershell
 python .\scripts\stage_native.py --from-release        # 取 v{FFI 版本} 发布的资产

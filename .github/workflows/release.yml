@@ -366,17 +366,17 @@ jobs:
           path: ffi-assets
           merge-multiple: true
 
-      - name: Stage native libraries built by this release
+      - name: Stage freshly built CodeKit FFI and ripgrep
         if: needs.prepare-release.outputs.has_ffi_targets == 'true'
         run: python ./scripts/stage_native.py --asset-dir ffi-assets
 
-      - name: Stage native libraries from the reused codekit-ffi release
+      - name: Stage released CodeKit FFI and ripgrep
         if: needs.prepare-release.outputs.has_ffi_targets != 'true'
         run: python ./scripts/stage_native.py --from-release
 
-      # The platform layout gives each system a package that carries only its own codekit-ffi library, plus the
+      # The platform layout gives each system its own codekit-ffi library and ripgrep archive, plus the
       # all-systems package for hosts older than LuaSkills 0.8.0 and the package index that 0.8.0 reads.
-      # 分平台布局为每个系统生成只携带自身 codekit-ffi 库的包，并附带供 LuaSkills 0.8.0 之前宿主使用的
+      # 分平台布局为每个系统生成携带自身 codekit-ffi 库和 ripgrep 归档的包，并附带供 LuaSkills 0.8.0 之前宿主使用的
       # 全系统包，以及 0.8.0 读取的包索引。
       - name: Build skill packages
         uses: LuaSkills/luaskills-debug@v0.8.0
@@ -505,8 +505,7 @@ jobs:
             Vulcan CodeKit LuaSkill release ${{ needs.prepare-release.outputs.version }}.
 
             - Skill package assets follow the managed LuaSkill GitHub release naming rules.
-            - This joint release includes the previously committed RG scale/diagnostic improvements and the new repository-first Repo Map workflow.
-            - Each supported system has its own skill package that bundles only that system's codekit-ffi library; LuaSkills 0.8.0 or newer picks it through vulcan-codekit-${{ needs.prepare-release.outputs.version }}-packages.json.
-            - The all-systems package bundles every library for older hosts. No package downloads native assets at install time.
+            - Each supported system has a skill package bundling its codekit-ffi library and ripgrep archive. LuaSkills 0.8.0 or newer picks it through vulcan-codekit-${{ needs.prepare-release.outputs.version }}-packages.json.
+            - The all-systems package bundles those dependencies for every supported platform. LuaSkills installs both dependencies from the skill package.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

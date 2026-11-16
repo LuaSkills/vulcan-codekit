@@ -4,40 +4,43 @@ tool_dependencies:
     required: true
     scope: skill
     source:
-      type: github_release
-      github:
-        repo: BurntSushi/ripgrep
+      type: bundled
     packages:
       windows-x64:
         archive_type: zip
-        asset_name: ripgrep-{version}-x86_64-pc-windows-msvc.zip
+        path: native/windows-x64/ripgrep-14.1.1-x86_64-pc-windows-msvc.zip
+        sha256: "d0f534024c42afd6cb4d38907c25cd2b249b79bbe6cc1dbee8e3e37c2b6e25a1"
         exports:
           - archive_path: ripgrep-{version}-x86_64-pc-windows-msvc/rg.exe
             target_path: bin/rg.exe
       linux-x64:
         archive_type: tar_gz
-        asset_name: ripgrep-{version}-x86_64-unknown-linux-musl.tar.gz
+        path: native/linux-x64/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz
+        sha256: "4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e"
         exports:
           - archive_path: ripgrep-{version}-x86_64-unknown-linux-musl/rg
             target_path: bin/rg
             executable: true
       linux-arm64:
         archive_type: tar_gz
-        asset_name: ripgrep-{version}-aarch64-unknown-linux-gnu.tar.gz
+        path: native/linux-arm64/ripgrep-14.1.1-aarch64-unknown-linux-gnu.tar.gz
+        sha256: "c827481c4ff4ea10c9dc7a4022c8de5db34a5737cb74484d62eb94a95841ab2f"
         exports:
           - archive_path: ripgrep-{version}-aarch64-unknown-linux-gnu/rg
             target_path: bin/rg
             executable: true
       macos-arm64:
         archive_type: tar_gz
-        asset_name: ripgrep-{version}-aarch64-apple-darwin.tar.gz
+        path: native/macos-arm64/ripgrep-14.1.1-aarch64-apple-darwin.tar.gz
+        sha256: "24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be"
         exports:
           - archive_path: ripgrep-{version}-aarch64-apple-darwin/rg
             target_path: bin/rg
             executable: true
       macos-x64:
         archive_type: tar_gz
-        asset_name: ripgrep-{version}-x86_64-apple-darwin.tar.gz
+        path: native/macos-x64/ripgrep-14.1.1-x86_64-apple-darwin.tar.gz
+        sha256: "fc87e78f7cb3fea12d69072e7ef3b21509754717b746368fd40d88963630e2b3"
         exports:
           - archive_path: ripgrep-{version}-x86_64-apple-darwin/rg
             target_path: bin/rg

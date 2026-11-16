@@ -5,8 +5,8 @@ luac.out
 dist/
 target/
 codekit-ffi/target/
-# Native libraries staged into the skill package by scripts/stage_native.py.
-# 由 scripts/stage_native.py 暂存进技能包的原生库。
+# Native dependencies staged into the skill package by scripts/stage_native.py.
+# 由 scripts/stage_native.py 暂存进技能包的原生依赖。
 native/
 __pycache__/
 *.pyc

@@ -71,7 +71,7 @@ jobs:
           if reused == "false":
               print(f"codekit-ffi {ffi_version} is new in this skill version; the release workflow builds the bundled package.")
 
-      - name: Stage bundled native libraries from the reused release
+      - name: Stage bundled CodeKit FFI and ripgrep
         if: steps.bundle.outputs.reused == 'true'
         run: python ./scripts/stage_native.py --from-release
 
@@ -103,7 +103,7 @@ jobs:
           if not Path(f"dist-skill-smoke/vulcan-codekit-v{version}-packages.json").is_file():
               raise SystemExit("The platform layout must write the package index")
           with ZipFile(package_path) as archive:
-              names = archive.namelist()
+              names = set(archive.namelist())
 
           if not any(name.startswith("vulcan-codekit/") for name in names):
               raise SystemExit("LuaSkill package must contain a vulcan-codekit/ root directory")
@@ -117,12 +117,27 @@ jobs:
           # Every bundled payload declared by dependencies.yaml must be inside the package.
           # dependencies.yaml 声明的每个内置载荷都必须在包内。
           manifest = yaml.safe_load(Path("dependencies.yaml").read_text(encoding="utf-8"))
-          for dependency in manifest.get("ffi_dependencies", []):
-              if dependency.get("source", {}).get("type") != "bundled":
-                  continue
-              for platform, package in dependency["packages"].items():
-                  if f"vulcan-codekit/{package['path']}" not in names:
-                      raise SystemExit(f"LuaSkill package is missing bundled payload for {platform}: {package['path']}")
+          # Group declared archive members by their target platform.
+          # 按目标平台分组记录清单声明的归档成员。
+          payloads_by_platform = {}
+          for group in ("tool_dependencies", "ffi_dependencies"):
+              for dependency in manifest[group]:
+                  if dependency["source"]["type"] == "bundled":
+                      for platform, package in dependency["packages"].items():
+                          payloads_by_platform.setdefault(platform, set()).add(f"vulcan-codekit/{package['path']}")
+          # Use the declared members to verify the universal archive and each platform split.
+          # 根据声明的成员校验全系统归档以及每个平台分包。
+          all_payloads = set().union(*payloads_by_platform.values())
+          if not all_payloads <= names:
+              raise SystemExit(f"Universal LuaSkill package is missing bundled payloads: {sorted(all_payloads - names)}")
+          for platform, payloads in payloads_by_platform.items():
+              # Compare only bundled payloads since the platform packages share other content.
+              # 平台包共享其他内容，因此这里只比较内置载荷。
+              platform_path = package_path.with_name(f"vulcan-codekit-v{version}-{platform}-skill.zip")
+              with ZipFile(platform_path) as archive:
+                  platform_payloads = set(archive.namelist()) & all_payloads
+              if platform_payloads != payloads:
+                  raise SystemExit(f"Unexpected bundled payloads for {platform}: {sorted(platform_payloads ^ payloads)}")
 
       - name: Check unified CodeKit FFI dependency licenses
         run: cargo deny --config deny.toml --exclude-dev check licenses
