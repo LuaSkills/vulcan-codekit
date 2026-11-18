@@ -1,4 +1,4 @@
-# `vulcan-codekit-repo-map`
+# `vulcan_codekit_repo_map`
 
 Start analysis of an unfamiliar repository with Repo Map. It reports repository scale, directory distribution, and code statistics for every language Tokei recognizes, so the exact `ast-tree` or `rg` directory scope can be chosen afterwards.
 
@@ -65,12 +65,12 @@ Plain Markdown with these sections:
 
 ## Recommended workflow
 
-1. `vulcan-codekit-repo-map`: understand total scale, directory and language distribution, and code hotspots.
-2. `vulcan-codekit-ast-tree`: build a per-file AST summary of one source directory selected from Repo Map.
-3. `vulcan-codekit-ast-detail`: expand the structure of files that are already known.
-4. `vulcan-codekit-rg`: map text anchors to their owning function, method, or type inside the narrowed directory.
-5. `vulcan-codekit-node-source`: read the full current source of known functions or methods.
-6. `vulcan-codekit-patch`: replace confirmed whole functions or methods structurally.
+1. `vulcan_codekit_repo_map`: understand total scale, directory and language distribution, and code hotspots.
+2. `vulcan_codekit_ast_tree`: build a per-file AST summary of one source directory selected from Repo Map.
+3. `vulcan_codekit_ast_detail`: expand the structure of files that are already known.
+4. `vulcan_codekit_rg`: map text anchors to their owning function, method, or type inside the narrowed directory.
+5. `vulcan_codekit_node_source`: read the full current source of known functions or methods.
+6. `vulcan_codekit_patch`: replace confirmed whole functions or methods structurally.
 
 ## Misuse to avoid
 

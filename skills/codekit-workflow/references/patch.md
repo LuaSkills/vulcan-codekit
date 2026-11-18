@@ -1,4 +1,4 @@
-# `vulcan-codekit-patch`
+# `vulcan_codekit_patch`
 
 Use this workflow only when the target functions or methods are already confirmed, `node-source` has supplied the current node source, and every replacement is a whole-function or whole-method replacement.
 

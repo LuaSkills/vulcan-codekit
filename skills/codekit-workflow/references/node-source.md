@@ -1,6 +1,6 @@
-# `vulcan-codekit-node-source`
+# `vulcan_codekit_node_source`
 
-Use this workflow after `ast-detail` or `rg` has already identified one or more owning functions or methods, and before `vulcan-codekit-patch` replaces any of them as whole nodes.
+Use this workflow after `ast-detail` or `rg` has already identified one or more owning functions or methods, and before `vulcan_codekit_patch` replaces any of them as whole nodes.
 
 Path context:
 
@@ -11,7 +11,7 @@ Best for:
 
 - reading exact function or method bodies without opening the whole file
 - reviewing implementation details after structural owner discovery
-- preparing a safe full-function replacement for `vulcan-codekit-patch`
+- preparing a safe full-function replacement for `vulcan_codekit_patch`
 - confirming the current source before an optional stale-checked replacement
 
 Typical route:

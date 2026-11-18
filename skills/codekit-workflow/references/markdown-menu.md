@@ -1,4 +1,4 @@
-# `vulcan-codekit-markdown-menu`
+# `vulcan_codekit_markdown_menu`
 
 Use this workflow when the right Markdown document or heading is still unknown.
 

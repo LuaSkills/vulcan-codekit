@@ -1,5 +1,7 @@
 # Vulcan CodeKit
 
+Vulcan Code 内可加载[随包提示词 Skill](skills/codekit-workflow/SKILL.md)，查看如何选择工具和发起调用。
+
 语言：[English](README.md) | 简体中文
 
 `Vulcan CodeKit` 的核心定位不是“又一个 AST 工具”，而是把代码结构转换成 Agent 能直接推理、继续执行的上下文。
@@ -10,13 +12,13 @@
 
 当前 LuaSkills 新命名采用 `skill_id-entry_name` 的 canonical 形式，因此推荐直接使用：
 
-- `vulcan-codekit-repo-map`
-- `vulcan-codekit-ast-tree`
-- `vulcan-codekit-ast-detail`
-- `vulcan-codekit-rg`
-- `vulcan-codekit-markdown-menu`
-- `vulcan-codekit-node-source`
-- `vulcan-codekit-patch`
+- `vulcan_codekit_repo_map`
+- `vulcan_codekit_ast_tree`
+- `vulcan_codekit_ast_detail`
+- `vulcan_codekit_rg`
+- `vulcan_codekit_markdown_menu`
+- `vulcan_codekit_node_source`
+- `vulcan_codekit_patch`
 
 ## 项目路径上下文
 
@@ -95,7 +97,7 @@
 
 ## 核心能力
 
-### `vulcan-codekit-repo-map`
+### `vulcan_codekit_repo_map`
 
 先理解仓库，再让 AST 工具枚举具体代码文件。
 
@@ -117,7 +119,7 @@
 
 Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.github` 等正式隐藏目录会被包含，而 `.git`、构建产物、依赖目录及其他高噪音目录始终强制排除。
 
-### `vulcan-codekit-ast-tree`
+### `vulcan_codekit_ast_tree`
 
 先看地图，再看细节。
 
@@ -136,7 +138,7 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 - 我不知道该从哪个目录切入
 - 我只想快速建立“代码地图”
 
-### `vulcan-codekit-ast-detail`
+### `vulcan_codekit_ast_detail`
 
 给定明确文件后，不直接把全文砸你脸上，而是先展开结构骨架。
 
@@ -155,7 +157,7 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 - 精确定位改动边界
 - 在真正读源码之前先看骨架
 
-### `vulcan-codekit-rg`
+### `vulcan_codekit_rg`
 
 这是整个工具组里最容易让人上头的部分。
 
@@ -163,7 +165,7 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 - “关键词出现在第几行”
 
-`vulcan-codekit-rg` 告诉你：
+`vulcan_codekit_rg` 告诉你：
 
 - “关键词出现在第几行”
 - “这行属于哪个函数”
@@ -185,9 +187,9 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 上述检索范围内的全部文本命中都会保留。索引 AST 范围外的顶层常量、导入、模块声明和注释等内容，以 `@ Unowned matches (no indexed AST owner)` 分组返回文件路径、行号与命中文本；完全没有索引符号的文件同样返回命中，已有索引归属的命中继续携带原有结构上下文。
 
-异常超长行按每个命中的位置展示 UTF-8 安全片段，保留原始字节范围，并说明为何省略文本。命中内容本身过长时保留完整范围和首尾片段。这会限制单条输出行长度，但不会丢弃命中；大量结果仍由宿主分页。运行时定义的具体限制和输出格式见 [RG 预览行为](help/rg.md)。
+异常超长行按每个命中的位置展示 UTF-8 安全片段，保留原始字节范围，并说明为何省略文本。命中内容本身过长时保留完整范围和首尾片段。这会限制单条输出行长度，但不会丢弃命中；大量结果仍由宿主分页。运行时定义的具体限制和输出格式见 [RG 预览行为](skills/codekit-workflow/references/rg.md)。
 
-### `vulcan-codekit-markdown-menu`
+### `vulcan_codekit_markdown_menu`
 
 先看文档标题树，再决定读正文。
 
@@ -197,9 +199,9 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 - 给大文档树做导航
 - 防止一开始把整堆 Markdown 正文塞进上下文
 
-### `vulcan-codekit-node-source`
+### `vulcan_codekit_node_source`
 
-当 `ast-detail` 或 `rg` 已经确认目标函数/方法后，按 `structural_path` 直接取回一个或多个节点的当前完整源码，支持跨文件批量读取。正常工作流里，这一步通常紧接在 `vulcan-codekit-patch` 之前。
+当 `ast-detail` 或 `rg` 已经确认目标函数/方法后，按 `structural_path` 直接取回一个或多个节点的当前完整源码，支持跨文件批量读取。正常工作流里，这一步通常紧接在 `vulcan_codekit_patch` 之前。
 
 它会返回：
 
@@ -237,7 +239,7 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 - `enum`、`enum variant/member`、结构字段、类型别名、语句级节点都不在这条工作流里
 - 它是整节点替换前的读取步骤，不是通用结构提取器
 
-### `vulcan-codekit-patch`
+### `vulcan_codekit_patch`
 
 当目标已经明确到函数级别后，用结构化方式替换一个或多个函数/方法。正常工作流里会先调用 `node-source`，基于返回的当前节点源码生成完整 replacement。
 
@@ -367,13 +369,13 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 
 ## 当前包含的工具
 
-- `vulcan-codekit-repo-map`
-- `vulcan-codekit-ast-tree`
-- `vulcan-codekit-ast-detail`
-- `vulcan-codekit-rg`
-- `vulcan-codekit-markdown-menu`
-- `vulcan-codekit-node-source`
-- `vulcan-codekit-patch`
+- `vulcan_codekit_repo_map`
+- `vulcan_codekit_ast_tree`
+- `vulcan_codekit_ast_detail`
+- `vulcan_codekit_rg`
+- `vulcan_codekit_markdown_menu`
+- `vulcan_codekit_node_source`
+- `vulcan_codekit_patch`
 
 ## 独立仓库说明
 
@@ -382,14 +384,14 @@ Repo Map 会先完成完整递归聚合，再限制模型可见目录深度。`.
 - `runtime/`：LuaSkill 工具入口与共享运行时代码
 - `rules/`：按语言拆分的 ast-grep 结构匹配规则
 - `schemas/`：复杂 AI 工具输入使用的外部 JSON Schema 文件
-- `help/`：严格帮助流与各工具说明
+- `skills/`：随包提示词 Skill 与各工具参考资料
 - `skills/`：Codex 技能说明与 Agent 使用指引
 - `codekit-ffi/`：统一 Rust 动态库项目，同时承载兼容 ast-grep 扫描与 Tokei 仓库统计
 - `scripts/`：skill 包与 FFI release 产物的校验、打包脚本
 
 仓库不再作为 demo skill 维护，而是作为 `vulcan-codekit` 的发布源。发布时会生成两类产物：
 
-- LuaSkill 包：包含 `runtime/`、`rules/`、`schemas/`、`help/`、`skills/`、`dependencies.yaml` 等运行所需文件，以及存放全部受支持平台 `vulcan_codekit_ffi` 动态库的 `native/{platform}/`
+- LuaSkill 包：包含 `runtime/`、`rules/`、`schemas/`、`skills/`、`skills/`、`dependencies.yaml` 等运行所需文件，以及存放全部受支持平台 `vulcan_codekit_ffi` 动态库的 `native/{platform}/`
 - FFI 组件包：包含平台对应的 `vulcan_codekit_ffi` 动态库，是技能包内置原生库时经过校验的来源
 
 ## 依赖与发布产物
@@ -436,7 +438,7 @@ luaskills-debug package --skill-path . --out-dir dist --layout platform --includ
 
 GitHub Actions 中的 `Release Vulcan CodeKit LuaSkill` 支持 tag push，以及对一个已存在标签进行手动重建。workflow 会先解析并检出不可变标签，再读取发布元数据；所选标签必须与 `v{该标签内 skill.yaml.version}` 一致。
 
-`codekit-ffi` 与技能独立版本化。FFI 版本分布在四处，必须始终一致：`codekit-ffi/Cargo.toml`、`codekit-ffi/Cargo.lock` 中的 `vulcan-codekit-ffi` 条目、`dependencies.yaml` 中的 `codekit-ffi` 条目，以及 `runtime/codekit-ffi.lua` 的 `CODEKIT_FFI_VERSION`。FFI 版本不得新于技能版本：
+`codekit-ffi` 与技能独立版本化。FFI 版本分布在四处，必须始终一致：`codekit-ffi/Cargo.toml`、`codekit-ffi/Cargo.lock` 中的 `vulcan_codekit_ffi` 条目、`dependencies.yaml` 中的 `codekit-ffi` 条目，以及 `runtime/codekit-ffi.lua` 的 `CODEKIT_FFI_VERSION`。FFI 版本不得新于技能版本：
 
 - 原生代码有改动：把 FFI 版本提升到新的技能版本，该发布会构建并发布 FFI 资产。
 - 只改 Lua：保持 FFI 版本不变，发布跳过 FFI 构建，打包时内置 `v{FFI 版本}` 发布的已有资产；已安装的依赖目录按 FFI 版本区分，技能更新会继续使用已安装的原生库。

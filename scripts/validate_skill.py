@@ -119,7 +119,7 @@ def validate_layout(root: Path) -> None:
         root / "runtime" / "codekit-ffi.lua",
         root / "runtime" / "codekit-path.lua",
         root / "runtime" / "codekit-repo-map.lua",
-        root / "help" / "repo-map.md",
+        root / "skills" / "codekit-workflow" / "references" / "repo-map.md",
         root / "codekit-ffi" / "Cargo.toml",
         root / "codekit-ffi" / "Cargo.lock",
         root / "codekit-ffi" / "deny.toml",
@@ -129,7 +129,7 @@ def validate_layout(root: Path) -> None:
     ]
     required_dirs = [
         root / "runtime",
-        root / "help",
+        root / "skills",
         root / "overflow_templates",
         root / "rules",
         root / "schemas",
@@ -169,40 +169,26 @@ def validate_manifest(root: Path) -> None:
         entry_names.append(entry_name)
     require(len(entry_names) == len(set(entry_names)), "skill.yaml entry names must be unique")
 
-    # Pin the repository-first entry to its exact runtime and help contracts.
-    # 将仓库优先入口锁定到精确运行时与帮助契约。
+    # Pin the repository-first entry to its exact runtime contract.
+    # 将仓库优先入口锁定到精确运行时契约。
     repo_map_entry = next((entry for entry in entries if entry.get("name") == "repo-map"), None)
     require(isinstance(repo_map_entry, dict), "skill.yaml must declare the repo-map entry")
     require(repo_map_entry.get("lua_entry") == "runtime/codekit-repo-map.lua", "repo-map must use runtime/codekit-repo-map.lua")
-    require(repo_map_entry.get("help") == "repo-map", "repo-map must use the repo-map help topic")
 
-    help_block = manifest.get("help", {})
-    main_help = help_block.get("main")
-    require(isinstance(main_help, dict), "skill.yaml must declare help.main")
-    main_help_file = main_help.get("file")
-    require(isinstance(main_help_file, str) and main_help_file, "help.main.file must be a non-empty string")
-    require((root / main_help_file).is_file(), f"Main help file is missing: {main_help_file}")
-
-    topics = help_block.get("topics", []) or []
-    require(isinstance(topics, list), "help.topics must be a YAML list")
-    # Collect only validated help identities so malformed values produce precise errors.
-    # 仅收集已校验的帮助身份，使畸形值产生精确错误。
-    topic_names: list[str] = []
-    for topic in topics:
-        require(isinstance(topic, dict), "Each help topic must be one YAML object")
-        topic_name = topic.get("name")
-        topic_file = topic.get("file")
-        require(isinstance(topic_name, str) and topic_name, "Each help topic requires a non-empty name")
-        require(isinstance(topic_file, str) and topic_file, f"Help topic '{topic_name}' requires one file path")
-        require((root / topic_file).is_file(), f"Help topic '{topic_name}' points to a missing file: {topic_file}")
-        topic_names.append(topic_name)
-    require(len(topic_names) == len(set(topic_names)), "skill.yaml help topic names must be unique")
-
-    # Require the repository-first help topic to point to the checked-in guide.
-    # 要求仓库优先帮助主题指向已纳入仓库的指南。
-    repo_map_topic = next((topic for topic in topics if topic.get("name") == "repo-map"), None)
-    require(isinstance(repo_map_topic, dict), "skill.yaml must declare the repo-map help topic")
-    require(repo_map_topic.get("file") == "help/repo-map.md", "repo-map help must use help/repo-map.md")
+    # Check that the declared guide and its default introduction are shipped with the package.
+    # 校验声明的指南及默认语言介绍随包交付。
+    registration = manifest.get("registration")
+    require(isinstance(registration, dict), "skill.yaml must declare registration")
+    require(registration.get("mode") == "explicit", "The package must register its tools explicitly")
+    default_locale = registration.get("default_locale")
+    require(default_locale in registration.get("locales", {}), "Missing default package introduction")
+    guides = registration.get("prompt_skills")
+    require(isinstance(guides, list) and len(guides) == 1, "Declare one bundled prompt skill")
+    guide = guides[0]
+    guide_file = f"skills/{guide['name']}/SKILL.md"
+    require(guide.get("file") == guide_file, "The guide path must match its registered name")
+    require(default_locale in guide.get("locales", {}), "Missing default guide introduction")
+    require((root / guide_file).is_file(), f"Missing bundled guide: {guide_file}")
 
 
 """

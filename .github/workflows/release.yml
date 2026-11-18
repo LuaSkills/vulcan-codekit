@@ -379,7 +379,7 @@ jobs:
       # 分平台布局为每个系统生成携带自身 codekit-ffi 库和 ripgrep 归档的包，并附带供 LuaSkills 0.8.0 之前宿主使用的
       # 全系统包，以及 0.8.0 读取的包索引。
       - name: Build skill packages
-        uses: LuaSkills/luaskills-debug@v0.8.0
+        uses: LuaSkills/luaskills-debug@v0.9.1
         with:
           skill-id: vulcan-codekit
           layout: platform

@@ -1,6 +1,6 @@
-# `vulcan-codekit-ast-tree`
+# `vulcan_codekit_ast_tree`
 
-Use this workflow after Repo Map has identified the source directory to inspect. If the repository or source scope is still unfamiliar, run `vulcan-codekit-repo-map` first.
+Use this workflow after Repo Map has identified the source directory to inspect. If the repository or source scope is still unfamiliar, run `vulcan_codekit_repo_map` first.
 
 Path context:
 

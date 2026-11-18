@@ -1,4 +1,4 @@
-# `vulcan-codekit-rg`
+# `vulcan_codekit_rg`
 
 Use this workflow when you already have a text anchor and need to find the owning structure.
 

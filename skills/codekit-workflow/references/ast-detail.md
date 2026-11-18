@@ -1,4 +1,4 @@
-# `vulcan-codekit-ast-detail`
+# `vulcan_codekit_ast_detail`
 
 Use this workflow when you already know the exact file paths and need structural detail instead of raw text.
 

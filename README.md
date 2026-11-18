@@ -1,5 +1,7 @@
 # Vulcan CodeKit
 
+See the [bundled prompt skill](skills/codekit-workflow/SKILL.md) for tool selection and call examples.
+
 Languages: English | [简体中文](README.zh-CN.md)
 
 `Vulcan CodeKit` is not positioned as "yet another AST tool". Its core purpose is to turn code structure into context that an Agent can reason about and continue acting on.
@@ -10,13 +12,13 @@ It is not a generic toolkit that glues together `grep`, `AST`, and `LSP`. It is 
 
 The current LuaSkills naming scheme uses the canonical `skill_id-entry_name` form, so the recommended tool names are:
 
-- `vulcan-codekit-repo-map`
-- `vulcan-codekit-ast-tree`
-- `vulcan-codekit-ast-detail`
-- `vulcan-codekit-rg`
-- `vulcan-codekit-markdown-menu`
-- `vulcan-codekit-node-source`
-- `vulcan-codekit-patch`
+- `vulcan_codekit_repo_map`
+- `vulcan_codekit_ast_tree`
+- `vulcan_codekit_ast_detail`
+- `vulcan_codekit_rg`
+- `vulcan_codekit_markdown_menu`
+- `vulcan_codekit_node_source`
+- `vulcan_codekit_patch`
 
 ## Project Path Context
 
@@ -95,7 +97,7 @@ It reorganizes these capabilities into a workflow protocol that is easier for Ag
 
 ## Core Capabilities
 
-### `vulcan-codekit-repo-map`
+### `vulcan_codekit_repo_map`
 
 Understand the repository before asking AST tools to enumerate individual code files.
 
@@ -117,7 +119,7 @@ Useful when:
 
 Repo Map performs a complete recursive aggregation before limiting the model-visible directory depth. Hidden formal directories such as `.github` are included, while `.git`, build output, dependencies, and other high-noise directories remain hard excluded.
 
-### `vulcan-codekit-ast-tree`
+### `vulcan_codekit_ast_tree`
 
 Read the map before reading the details.
 
@@ -136,7 +138,7 @@ Useful when:
 - You do not know which directory to start from
 - You only want to quickly build a "code map"
 
-### `vulcan-codekit-ast-detail`
+### `vulcan_codekit_ast_detail`
 
 Once a specific file is known, this does not dump the whole file at you. It expands the structural skeleton first.
 
@@ -155,7 +157,7 @@ Useful when:
 - Locating modification boundaries precisely
 - Inspecting the skeleton before reading actual source
 
-### `vulcan-codekit-rg`
+### `vulcan_codekit_rg`
 
 This is the part of the toolset that tends to feel immediately addictive.
 
@@ -163,7 +165,7 @@ Normal search tells you:
 
 - "The keyword appears on this line"
 
-`vulcan-codekit-rg` tells you:
+`vulcan_codekit_rg` tells you:
 
 - "The keyword appears on this line"
 - "This line belongs to this function"
@@ -185,9 +187,9 @@ For large repositories, this is not a small improvement. It is a change in effic
 
 All text hits within that search scope are retained. Lines outside indexed AST ranges, including top-level constants, imports, module declarations, and comments, appear under `@ Unowned matches (no indexed AST owner)` with their file path and line number. Files without indexed symbols also return their hits; indexed matches retain their existing owner context.
 
-Abnormally long lines use UTF-8-safe excerpts around every occurrence, retaining source byte ranges and explaining why text was omitted. Oversized matched spans retain their full range and both ends. This bounds individual output lines without dropping matches; large result sets remain pageable. See [RG preview behavior](help/rg.md) for the runtime-owned limits and output format.
+Abnormally long lines use UTF-8-safe excerpts around every occurrence, retaining source byte ranges and explaining why text was omitted. Oversized matched spans retain their full range and both ends. This bounds individual output lines without dropping matches; large result sets remain pageable. See [RG preview behavior](skills/codekit-workflow/references/rg.md) for the runtime-owned limits and output format.
 
-### `vulcan-codekit-markdown-menu`
+### `vulcan_codekit_markdown_menu`
 
 Read the document heading tree first, then decide which body text to open.
 
@@ -197,9 +199,9 @@ It is useful for:
 - Navigating large Markdown trees
 - Avoiding dumping a whole pile of Markdown bodies into context at the start
 
-### `vulcan-codekit-node-source`
+### `vulcan_codekit_node_source`
 
-After `ast-detail` or `rg` has confirmed a target function or method, this reads the complete current source of one or more nodes by `structural_path`, including cross-file batches. In the normal workflow, this is the read step immediately before `vulcan-codekit-patch`.
+After `ast-detail` or `rg` has confirmed a target function or method, this reads the complete current source of one or more nodes by `structural_path`, including cross-file batches. In the normal workflow, this is the read step immediately before `vulcan_codekit_patch`.
 
 It returns:
 
@@ -238,7 +240,7 @@ Boundaries:
 - non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are outside this workflow
 - it is the paired read step for whole-node replacement, not a generic structural extractor
 
-### `vulcan-codekit-patch`
+### `vulcan_codekit_patch`
 
 Once the target is known at function level, this replaces one or more functions or methods structurally. In the normal workflow, `node-source` is called first so the replacement is built from the exact current node source.
 
@@ -368,13 +370,13 @@ This is not a small user-experience tweak. It is a structural upgrade to the cod
 
 ## Included Tools
 
-- `vulcan-codekit-repo-map`
-- `vulcan-codekit-ast-tree`
-- `vulcan-codekit-ast-detail`
-- `vulcan-codekit-rg`
-- `vulcan-codekit-markdown-menu`
-- `vulcan-codekit-node-source`
-- `vulcan-codekit-patch`
+- `vulcan_codekit_repo_map`
+- `vulcan_codekit_ast_tree`
+- `vulcan_codekit_ast_detail`
+- `vulcan_codekit_rg`
+- `vulcan_codekit_markdown_menu`
+- `vulcan_codekit_node_source`
+- `vulcan_codekit_patch`
 
 ## Standalone Repository Notes
 
@@ -383,14 +385,14 @@ This repository is the standalone source repository for the `vulcan-codekit` Lua
 - `runtime/`: LuaSkill tool entry points and shared runtime code
 - `rules/`: ast-grep structural matching rules split by language
 - `schemas/`: external JSON Schema files for complex AI-facing tool inputs
-- `help/`: strict help flows and per-tool documentation
+- `skills/`: bundled prompt skill and per-tool references
 - `skills/`: Codex skill instructions and Agent usage guidance
 - `codekit-ffi/`: unified Rust dynamic library containing compatible ast-grep scanning and Tokei-powered repository statistics
 - `scripts/`: validation and packaging scripts for skill packages and FFI release artifacts
 
 This repository is no longer maintained as a demo skill. It is the release source for `vulcan-codekit`. Releases produce two types of artifacts:
 
-- LuaSkill package: includes `runtime/`, `rules/`, `schemas/`, `help/`, `skills/`, `dependencies.yaml`, other runtime files, and `native/{platform}/` with the `vulcan_codekit_ffi` dynamic library for every supported platform
+- LuaSkill package: includes `runtime/`, `rules/`, `schemas/`, `skills/`, `dependencies.yaml`, other runtime files, and `native/{platform}/` with the `vulcan_codekit_ffi` dynamic library for every supported platform
 - FFI component package: includes the platform-specific `vulcan_codekit_ffi` dynamic library; it is the verified source the skill package bundles from
 
 ## Dependencies and Release Artifacts
@@ -437,7 +439,7 @@ luaskills-debug package --skill-path . --out-dir dist --layout platform --includ
 
 The `Release Vulcan CodeKit LuaSkill` GitHub Actions workflow supports tag pushes and manual rebuilds of an existing tag. It resolves and checks out the immutable tag before reading release metadata; the selected tag must match `v{tagged skill.yaml.version}`.
 
-`codekit-ffi` is versioned independently of the skill. Its version lives in four places that must always agree: `codekit-ffi/Cargo.toml`, the `vulcan-codekit-ffi` entry in `codekit-ffi/Cargo.lock`, the `codekit-ffi` entry in `dependencies.yaml`, and `CODEKIT_FFI_VERSION` in `runtime/codekit-ffi.lua`. The FFI version may never be newer than the skill version:
+`codekit-ffi` is versioned independently of the skill. Its version lives in four places that must always agree: `codekit-ffi/Cargo.toml`, the `vulcan_codekit_ffi` entry in `codekit-ffi/Cargo.lock`, the `codekit-ffi` entry in `dependencies.yaml`, and `CODEKIT_FFI_VERSION` in `runtime/codekit-ffi.lua`. The FFI version may never be newer than the skill version:
 
 - Native change: bump the FFI version to the new skill version. That release builds and publishes the FFI assets.
 - Lua-only change: keep the FFI version. The release skips FFI builds and bundles the existing assets from release `v{FFI version}`; because the installed dependency root is keyed by the FFI version, a skill update keeps using the already installed native library.

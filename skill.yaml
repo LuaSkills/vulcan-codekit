@@ -1,38 +1,37 @@
 name: vulcan-codekit
-version: 0.2.9
+version: 0.2.10
 debug: false
-help:
-  main:
-    description: Structure-aware code navigation with repository maps, owner-aware search, exact function source, and whole-function patching.
-    file: help/main.md
-  topics:
-    - name: repo-map
-      description: Repository-first directory tree and all-language code statistics workflow.
-      file: help/repo-map.md
-    - name: ast-detail
-      description: Exact-file AST structure inspection workflow.
-      file: help/ast-detail.md
-    - name: rg
-      description: Text-anchor to owner-context lookup workflow.
-      file: help/rg.md
-    - name: markdown-menu
-      description: Markdown heading navigation workflow.
-      file: help/markdown-menu.md
-    - name: node-source
-      description: Function/method source extraction workflow that typically precedes whole-function patching by structural_path.
-      file: help/node-source.md
-    - name: ast-tree
-      description: Per-file AST map of one directory for candidate-file selection.
-      file: help/ast-tree.md
-    - name: patch
-      description: Safe whole-function replacement workflow paired with node-source output.
-      file: help/patch.md
+registration:
+  mode: explicit
+  default_locale: en-US
+  locales:
+    en-US:
+      title: "Vulcan CodeKit"
+      description: "Map repositories, inspect code structure, and replace complete function or method bodies."
+    zh-CN:
+      title: "Vulcan CodeKit"
+      description: "查看仓库结构、定位代码归属并替换完整函数或方法。"
+    zh-TW:
+      title: "Vulcan CodeKit"
+      description: "查看儲存庫結構、定位程式碼歸屬並替換完整函式或方法。"
+  prompt_skills:
+    - name: codekit-workflow
+      file: skills/codekit-workflow/SKILL.md
+      locales:
+        en-US:
+          title: "Code navigation workflow"
+          description: "Use this guide for repository maps, owner-aware search, exact source extraction, or whole-function edits."
+        zh-CN:
+          title: "代码导航指南"
+          description: "按仓库概览、归属定位、源码读取和整函数修改选择工具。"
+        zh-TW:
+          title: "程式碼導覽指南"
+          description: "依儲存庫概覽、歸屬定位、原始碼讀取及整函式修改選擇工具。"
 entries:
   - name: repo-map
     description: "[REPOSITORY FIRST MAP] Use this as the first step in an unfamiliar repository. Returns a directory-only tree, complete file census, Tokei all-language statistics, and explicit folding diagnostics without exposing a file tree."
     lua_entry: runtime/codekit-repo-map.lua
     lua_module: codekit_repo_map
-    help: repo-map
     parameters:
       - name: PWD
         type: string
@@ -51,10 +50,9 @@ entries:
         description: "Optional. Disable ordinary .gitignore, .ignore, and .tokeignore rules only when true. CodeKit hard exclusions such as .git, target, node_modules, and dist remain active."
         required: false
   - name: ast-detail
-    description: "[FILE AST DETAIL] Inspect one or more exact source files and return plain Markdown AST details. Use this only after you already know the exact files, typically from vulcan-codekit-ast-tree or vulcan-codekit-rg."
+    description: "[FILE AST DETAIL] Inspect one or more exact source files and return plain Markdown AST details. Use this only after you already know the exact files, typically from vulcan_codekit_ast_tree or vulcan_codekit_rg."
     lua_entry: runtime/codekit-ast-detail.lua
     lua_module: codekit_ast_detail
-    help: ast-detail
     parameters:
       - name: PWD
         type: string
@@ -72,7 +70,6 @@ entries:
     description: "[TEXT-TO-STRUCTURE BRIDGE] Search a directory with ripgrep and return all matching lines in the selected scope as plain Markdown. Include indexed AST owner context where available; preserve matches outside indexed ranges as file-level unowned matches, even when a file has no indexed symbols. Oversized lines use match-centered excerpts with byte ranges and explicit truncation reasons; no occurrences are dropped."
     lua_entry: runtime/codekit-rg.lua
     lua_module: codekit_rg
-    help: rg
     parameters:
       - name: PWD
         type: string
@@ -102,7 +99,6 @@ entries:
     description: "[MARKDOWN MENU] Triage Markdown files by headings only. Use this to locate the right docs file or section before reading body text elsewhere."
     lua_entry: runtime/codekit-markdown-menu.lua
     lua_module: codekit_markdown_menu
-    help: markdown-menu
     parameters:
       - name: PWD
         type: string
@@ -121,16 +117,14 @@ entries:
         description: "Disable ignore rules only when set to true. Leave it unset for the normal ignored-by-default documentation scan behavior."
         required: false
   - name: node-source
-    description: "[NODE SOURCE] Extract the full current source of one or more function/method nodes selected by structural_path. This is typically the read step before vulcan-codekit-patch so the caller can inspect the exact node source and prepare a whole-node replacement. Runtime hashes and overflow metadata are not included in normal success text. Only function/method nodes are supported today."
+    description: "[NODE SOURCE] Extract the full current source of one or more function/method nodes selected by structural_path. This is typically the read step before vulcan_codekit_patch so the caller can inspect the exact node source and prepare a whole-node replacement. Runtime hashes and overflow metadata are not included in normal success text. Only function/method nodes are supported today."
     lua_entry: runtime/codekit-node-source.lua
     lua_module: codekit_node_source
-    help: node-source
     input_schema_file: schemas/node-source.input.schema.json
   - name: ast-tree
     description: "[DIRECTORY AST TREE] Pick candidate source files from exactly one directory before deep inspection. Returns a compact recursive Markdown tree grouped by subdirectory."
     lua_entry: runtime/codekit-ast-tree.lua
     lua_module: codekit_ast_tree
-    help: ast-tree
     parameters:
       - name: PWD
         type: string
@@ -149,8 +143,7 @@ entries:
         description: "Disable ignore rules only when set to true. Leave it unset for the normal ignored-by-default tree scan behavior."
         required: false
   - name: patch
-    description: "[WHOLE FUNCTION PATCH] Replace one or more whole function/method nodes by structural_path and return the actual post-write target source with local context. This is a function/procedure-level whole-node replacement workflow, typically used after vulcan-codekit-node-source has returned the current node source. The replacement must be the complete function/method source, not a fragment. Non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are not supported."
+    description: "[WHOLE FUNCTION PATCH] Replace one or more whole function/method nodes by structural_path and return the actual post-write target source with local context. This is a function/procedure-level whole-node replacement workflow, typically used after vulcan_codekit_node_source has returned the current node source. The replacement must be the complete function/method source, not a fragment. Non-function symbols such as enum, enum variant/member, struct field, type alias, and statement-level nodes are not supported."
     lua_entry: runtime/codekit-patch.lua
     lua_module: codekit_patch
-    help: patch
     input_schema_file: schemas/patch.input.schema.json

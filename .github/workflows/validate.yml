@@ -77,7 +77,7 @@ jobs:
 
       - name: Package LuaSkill release path smoke
         if: steps.bundle.outputs.reused == 'true'
-        uses: LuaSkills/luaskills-debug@v0.8.0
+        uses: LuaSkills/luaskills-debug@v0.9.1
         with:
           skill-id: vulcan-codekit
           layout: platform
